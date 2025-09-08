@@ -19,7 +19,7 @@ If not already done, follow the Getting Started guide to install the ESP IDE (I 
 https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html
 
 ## Instructions:
-1. Provision the lamps with the nRF Connect App (they need to be in pairing mode to be provisioned)
+1. Provision the lamps with the nRF Mesh App (they need to be in pairing mode to be provisioned)
 2. In the App, assign it an Application Key
 3. In the Elements of the App, assign the same Application Key to the following Elements:
 (Not sure if all of them are really required but this is how it works for me)
