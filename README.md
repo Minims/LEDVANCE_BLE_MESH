@@ -27,6 +27,7 @@ https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.ht
    2. Generic Level Server
    3. Generic Power OnOff Server
    4. Light Lightness Server
+   5. Light HSL Server
 4. The lamp will now have an Unicast Address -> take a note of this
 5. Repeat the steps above for all your lamps
 6. Clone the repository
@@ -55,7 +56,8 @@ Payload:
    "stat_t":"~/state",
    "schema": "json",
    "brightness": true,
-   "bri_scl":50,
+   "bri_scl":100,
+   "sup_clrm":"hs",
    "pl_on": "ON",
    "pl_off": "OFF",
    "uniq_id":"lamp04",
