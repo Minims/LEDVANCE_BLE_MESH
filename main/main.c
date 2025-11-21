@@ -333,6 +333,14 @@ static void ble_mesh_lighting_client_cb(esp_ble_mesh_light_client_cb_event_t eve
             ESP_LOGI(TAG, "Lightness status from 0x%04X: %d", sender_addr, lightness);
             // Here you could update Home Assistant with the actual brightness if needed
         }
+        // else if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS) {
+        //     uint16_t sender_addr = param->params->ctx.addr;
+        //     uint16_t h = param->status_cb.hsl_status.hsl_hue;
+        //     uint16_t s = param->status_cb.hsl_status.hsl_saturation;
+        //     uint16_t lightness = param->status_cb.hsl_status.hsl_lightness;
+        //     ESP_LOGI(TAG, "hsl status from 0x%04X: %d %d %d", sender_addr, h,s,lightness);
+        //     // Here you could update Home Assistant with the actual hsl, but light does not appear to send these updates on boot.
+        // }
         break;
     default:
         break;
@@ -482,11 +490,11 @@ void ble_mesh_send_hsl_set(uint16_t hue, uint16_t saturation, uint16_t addr)
     esp_err_t err;
 
     if (app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED) {
-        ESP_LOGE(TAG, "Cannot send Lightness Set: AppKey has not been bound yet!");
+        ESP_LOGE(TAG, "Cannot send hsl Set: AppKey has not been bound yet!");
         return;
     }
 
-    ESP_LOGI(TAG, "Sending Lightness Set: hue=%d, sat=%d, addr=0x%04X, net_idx=0x%04x, app_idx=0x%04x",
+    ESP_LOGI(TAG, "Sending hsl Set: hue=%d, sat=%d, addr=0x%04X, net_idx=0x%04x, app_idx=0x%04x",
              hue, saturation, addr, app_state.net_idx, app_state.app_idx);
 
     common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET_UNACK;
@@ -507,7 +515,7 @@ void ble_mesh_send_hsl_set(uint16_t hue, uint16_t saturation, uint16_t addr)
 
     err = esp_ble_mesh_light_client_set_state(&common, &set);
     if (err) {
-        ESP_LOGE(TAG, "Failed to send Lightness Set message (err %d)", err);
+        ESP_LOGE(TAG, "Failed to send hsl Set message (err %d)", err);
     }
 }
 
@@ -547,7 +555,7 @@ static char *create_ha_discovery_payload(const char *lamp_name, const char *base
     cJSON_AddStringToObject(root, "stat_t", "~/state");
     cJSON_AddStringToObject(root, "schema", "json");
     cJSON_AddTrueToObject(root, "brightness");
-    cJSON_AddNumberToObject(root, "bri_scl", 50);
+    cJSON_AddNumberToObject(root, "bri_scl", 100);
     cJSON_AddStringToObject(root,"sup_clrm","hs");
     
     cJSON_AddStringToObject(root, "uniq_id", unique_id);
