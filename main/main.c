@@ -540,7 +540,7 @@ void refresh_mqtt_subscriptions(void)
     }
 }
 
-static char *create_ha_discovery_payload(const char *lamp_name, const char *base_topic, const char *unique_id)
+static char *create_ha_discovery_payload(const LampInfo *lamp, const char *base_topic)
 {
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) {
@@ -555,14 +555,18 @@ static char *create_ha_discovery_payload(const char *lamp_name, const char *base
     cJSON_AddStringToObject(root, "stat_t", "~/state");
     cJSON_AddStringToObject(root, "schema", "json");
     cJSON_AddTrueToObject(root, "brightness");
-    cJSON_AddNumberToObject(root, "bri_scl", 100);
-    cJSON_AddStringToObject(root,"sup_clrm","hs");
-    
-    cJSON_AddStringToObject(root, "uniq_id", unique_id);
+    // Use the lamp's specific brightness scaling
+    cJSON_AddNumberToObject(root, "bri_scl", lamp->brightness_scaling);
+
+    // Conditionally add color support
+    if (lamp->supports_color) {
+        cJSON_AddStringToObject(root,"sup_clrm","hs");
+    }
+    cJSON_AddStringToObject(root, "uniq_id", lamp->address);
 
     cJSON *dev = cJSON_CreateObject();
-    cJSON_AddStringToObject(dev, "name", lamp_name);
-    cJSON_AddStringToObject(dev, "identifiers", unique_id);
+    cJSON_AddStringToObject(dev, "name", lamp->name);
+    cJSON_AddStringToObject(dev, "identifiers", lamp->address);
     cJSON_AddStringToObject(dev, "manufacturer", "Espressif");
     cJSON_AddStringToObject(dev, "model", "BLE Mesh Lamp");
     cJSON_AddItemToObject(root, "dev", dev);
@@ -584,7 +588,7 @@ void publish_ha_discovery_messages(void)
         snprintf(base_topic, sizeof(base_topic), "homeassistant/light/%s", lamps[i].name);
         snprintf(config_topic, sizeof(config_topic), "homeassistant/light/%s/config", lamps[i].name);
 
-        char *payload = create_ha_discovery_payload(lamps[i].name, base_topic, lamps[i].address);
+        char *payload = create_ha_discovery_payload(&lamps[i], base_topic);
         if (payload) {
             ESP_LOGI(TAG, "Publishing to %s", config_topic);
             esp_mqtt_client_publish(mqtt_client, config_topic, payload, 0, 1, true);

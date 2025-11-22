@@ -60,11 +60,28 @@ static void _load_from_nvs(void) {
                 if (count >= MAX_LAMPS) break;
                 cJSON *name = cJSON_GetObjectItem(elem, "name");
                 cJSON *address = cJSON_GetObjectItem(elem, "address");
+                cJSON *color = cJSON_GetObjectItem(elem, "supports_color");
+                cJSON *scaling = cJSON_GetObjectItem(elem, "brightness_scaling");
                 if (cJSON_IsString(name) && cJSON_IsString(address)) {
                     strncpy(g_lamp_cache[count].name, name->valuestring, MAX_LAMP_NAME_LEN - 1);
                     strncpy(g_lamp_cache[count].address, address->valuestring, MAX_LAMP_ADDR_LEN - 1);
                     g_lamp_cache[count].name[MAX_LAMP_NAME_LEN - 1] = '\0';
                     g_lamp_cache[count].address[MAX_LAMP_ADDR_LEN - 1] = '\0';
+
+                    // Load color support (default to false if not present)
+                    if (cJSON_IsBool(color)) {
+                        g_lamp_cache[count].supports_color = cJSON_IsTrue(color);
+                    } else {
+                        g_lamp_cache[count].supports_color = false; 
+                    }
+
+                    // Load brightness scaling (default to 100 if not present)
+                    if (cJSON_IsNumber(scaling)) {
+                        g_lamp_cache[count].brightness_scaling = scaling->valueint;
+                    } else {
+                        g_lamp_cache[count].brightness_scaling = 100;
+                    }
+
                     count++;
                 }
             }
@@ -97,6 +114,8 @@ static esp_err_t _save_to_nvs(void) {
         cJSON *lamp_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(lamp_obj, "name", g_lamp_cache[i].name);
         cJSON_AddStringToObject(lamp_obj, "address", g_lamp_cache[i].address);
+        cJSON_AddBoolToObject(lamp_obj, "supports_color", g_lamp_cache[i].supports_color);
+        cJSON_AddNumberToObject(lamp_obj, "brightness_scaling", g_lamp_cache[i].brightness_scaling);
         cJSON_AddItemToArray(root, lamp_obj);
     }
 
