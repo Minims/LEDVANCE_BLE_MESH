@@ -2,6 +2,7 @@
 #define LAMP_NVS_H
 
 #include "esp_err.h"
+#include <stdbool.h>
 
 #define MAX_LAMP_NAME_LEN 32
 #define MAX_LAMP_ADDR_LEN 8
@@ -10,6 +11,8 @@
 typedef struct {
     char name[MAX_LAMP_NAME_LEN];
     char address[MAX_LAMP_ADDR_LEN];
+    bool supports_color;       // Flag to indicate if the lamp supports color (HS)
+    int brightness_scaling;    // Value to scale brightness (e.g., 50, 100, 255)
 } LampInfo;
 
 /**
