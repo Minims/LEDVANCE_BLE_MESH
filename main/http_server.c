@@ -6,6 +6,18 @@
 #include "cJSON.h"
 #include "main.h"
 #include "lamp_nvs.h"
+#include <ctype.h>
+
+static bool is_valid_hex_address(const char *addr) {
+    // Expect format 0xAAAA
+    if (addr == NULL || strlen(addr) < 3 || addr[0] != '0' || (addr[1] != 'x' && addr[1] != 'X')) {
+        return false;
+    }
+    for (int i = 2; i < strlen(addr); i++) {
+        if (!isxdigit((unsigned char)addr[i])) return false;
+    }
+    return true;
+}
 
 #define TAG "HTTP_SERVER"
 
@@ -53,13 +65,34 @@ static esp_err_t add_lamp_post_handler(httpd_req_t *req)
     buf[ret] = '\0';
 
     LampInfo new_lamp;
+    char scaling_buf[16];
+    char color_buf[4];
+
     if (get_post_field(buf, "lamp_name=", new_lamp.name, sizeof(new_lamp.name)) != ESP_OK ||
         get_post_field(buf, "lamp_address=", new_lamp.address, sizeof(new_lamp.address)) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
         return ESP_FAIL;
     }
+    // Parse Color Support (Checkbox present = true, otherwise false)
+    if (get_post_field(buf, "lamp_color=", color_buf, sizeof(color_buf)) == ESP_OK) {
+        new_lamp.supports_color = true;
+    } else {
+        new_lamp.supports_color = false;
+    }
+    // Parse Brightness Scaling
+    if (get_post_field(buf, "lamp_scaling=", scaling_buf, sizeof(scaling_buf)) == ESP_OK) {
+        new_lamp.brightness_scaling = atoi(scaling_buf);
+    } else {
+        new_lamp.brightness_scaling = 100; // Default
+    }
+    //validate proper address format
+    if (!is_valid_hex_address(new_lamp.address)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Address Format. Use 0x0000 hex format.");
+        return ESP_FAIL;
+    }
 
-    ESP_LOGI(TAG, "Adding lamp: Name='%s', Address='%s'", new_lamp.name, new_lamp.address);
+    ESP_LOGI(TAG, "Adding lamp: Name='%s', Addr='%s', Color=%d, Scale=%d", 
+        new_lamp.name, new_lamp.address, new_lamp.supports_color, new_lamp.brightness_scaling);
 
     esp_err_t err = add_lamp_info(&new_lamp);
     if (err == ESP_OK) {
@@ -119,6 +152,8 @@ static esp_err_t update_lamp_post_handler(httpd_req_t *req)
 
     char original_name[MAX_LAMP_NAME_LEN];
     LampInfo updated_lamp;
+    char scaling_buf[16];
+    char color_buf[4];
 
     if (get_post_field(buf, "original_name=", original_name, sizeof(original_name)) != ESP_OK ||
         get_post_field(buf, "lamp_name=", updated_lamp.name, sizeof(updated_lamp.name)) != ESP_OK ||
@@ -126,8 +161,26 @@ static esp_err_t update_lamp_post_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
         return ESP_FAIL;
     }
+    // Parse Color Support
+    if (get_post_field(buf, "lamp_color=", color_buf, sizeof(color_buf)) == ESP_OK) {
+        updated_lamp.supports_color = true;
+    } else {
+        updated_lamp.supports_color = false;
+    }
+    // Parse Brightness Scaling
+    if (get_post_field(buf, "lamp_scaling=", scaling_buf, sizeof(scaling_buf)) == ESP_OK) {
+        updated_lamp.brightness_scaling = atoi(scaling_buf);
+    } else {
+        updated_lamp.brightness_scaling = 100; // Default
+    }
+    //validate proper address format
+    if (!is_valid_hex_address(updated_lamp.address)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Address Format. Use 0x0000 hex format.");
+        return ESP_FAIL;
+    }
 
-    ESP_LOGI(TAG, "Updating lamp '%s' to Name='%s', Address='%s'", original_name, updated_lamp.name, updated_lamp.address);
+    ESP_LOGI(TAG, "Updating lamp '%s' to Name='%s', Addr='%s', Color=%d, Scale=%d", 
+             original_name, updated_lamp.name, updated_lamp.address, updated_lamp.supports_color, updated_lamp.brightness_scaling);
 
     esp_err_t err = update_lamp_info(original_name, &updated_lamp);
     if (err == ESP_OK) {
@@ -165,7 +218,7 @@ static esp_err_t get_lamps_overview_handler(httpd_req_t *req)
         ".container { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }"
         "</style></head><body><div class='container'>"
         "<h1>Lamp Overview</h1><table>"
-        "<tr><th>Name</th><th>Address</th><th>Actions</th></tr>");
+        "<tr><th>Name</th><th>Address</th><th>Type</th><th>Scale</th><th>Actions</th></tr>");
 
     int lamp_count;
     const LampInfo* lamps = get_all_lamps(&lamp_count);
@@ -173,7 +226,7 @@ static esp_err_t get_lamps_overview_handler(httpd_req_t *req)
     for (int i = 0; i < lamp_count; i++) {
         char row_buf[512];
         snprintf(row_buf, sizeof(row_buf),
-            "<tr><td>%s</td><td>%s</td><td>"
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>"
             "<form action='/remove_lamp' method='post'>"
             "<input type='hidden' name='lamp_name' value='%s'>"
             "<input type='submit' value='Remove' class='remove'>"
@@ -183,7 +236,10 @@ static esp_err_t get_lamps_overview_handler(httpd_req_t *req)
             "<input type='submit' value='Edit'>"
             "</form>"
             "</td></tr>",
-            lamps[i].name, lamps[i].address, lamps[i].name, lamps[i].name);
+            lamps[i].name, lamps[i].address,
+            lamps[i].supports_color ? "Color (HS)" : "White", 
+            lamps[i].brightness_scaling,
+            lamps[i].name, lamps[i].name);
         httpd_resp_sendstr_chunk(req, row_buf);
     }
 
@@ -196,6 +252,10 @@ static esp_err_t get_lamps_overview_handler(httpd_req_t *req)
         "<input type='text' id='lamp_name' name='lamp_name' required> "
         "<label for='lamp_address'>Address: </label>"
         "<input type='text' id='lamp_address' name='lamp_address' placeholder='e.g., 0x0019' required> "
+        "<label for='lamp_color'>Supports Color: </label>"
+        "<input type='checkbox' id='lamp_color' name='lamp_color' value='1'><br><br>"
+        "<label for='lamp_scaling'>Brightness Scale (e.g., 100): </label>"
+        "<input type='number' id='lamp_scaling' name='lamp_scaling' value='100' required><br><br>"
         "<input type='submit' value='Add Lamp'>"
         "</form>"
         "<h2>System</h2>"
@@ -239,7 +299,7 @@ static esp_err_t edit_lamp_get_handler(httpd_req_t *req)
         "input[type=submit] { background-color: #4CAF50; color: white; cursor: pointer; }"
         "</style></head><body><div class='container'>");
 
-    char chunk_buf[512]; // A reasonably sized buffer for dynamic parts
+    char chunk_buf[1024]; // A reasonably sized buffer for dynamic parts
     
     // Send header with lamp name
     snprintf(chunk_buf, sizeof(chunk_buf), "<h1>Edit Lamp: %s</h1>", lamp_to_edit.name);
@@ -258,10 +318,16 @@ static esp_err_t edit_lamp_get_handler(httpd_req_t *req)
     snprintf(chunk_buf, sizeof(chunk_buf),
              "<label for='lamp_address'>New Address:</label><br>"
              "<input type='text' id='lamp_address' name='lamp_address' value='%s' required><br><br>"
+             "<label for='lamp_color'>Supports Color: </label>"
+             "<input type='checkbox' id='lamp_color' name='lamp_color' value='1' %s><br><br>"
+             "<label for='lamp_scaling'>Brightness Scale:</label><br>"
+             "<input type='number' id='lamp_scaling' name='lamp_scaling' value='%d' required><br><br>"
              "<input type='submit' value='Update Lamp'>"
              "</form><br><a href='/'>Back to Overview</a>"
              "</div></body></html>",
-             lamp_to_edit.address);
+             lamp_to_edit.address,
+             lamp_to_edit.supports_color ? "checked" : "",
+             lamp_to_edit.brightness_scaling);
     httpd_resp_sendstr_chunk(req, chunk_buf);
 
     // Send final chunk to close connection

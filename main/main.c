@@ -334,6 +334,14 @@ static void ble_mesh_lighting_client_cb(esp_ble_mesh_light_client_cb_event_t eve
             ESP_LOGI(TAG, "Lightness status from 0x%04X: %d", sender_addr, lightness);
             // Here you could update Home Assistant with the actual brightness if needed
         }
+        // else if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS) {
+        //     uint16_t sender_addr = param->params->ctx.addr;
+        //     uint16_t h = param->status_cb.hsl_status.hsl_hue;
+        //     uint16_t s = param->status_cb.hsl_status.hsl_saturation;
+        //     uint16_t lightness = param->status_cb.hsl_status.hsl_lightness;
+        //     ESP_LOGI(TAG, "hsl status from 0x%04X: %d %d %d", sender_addr, h,s,lightness);
+        //     // Here you could update Home Assistant with the actual hsl, but light does not appear to send these updates on boot.
+        // }
         break;
     default:
         break;
@@ -476,6 +484,42 @@ void ble_mesh_send_lightness_set(uint16_t lightness, uint16_t addr)
     }
 }
 
+void ble_mesh_send_hsl_set(uint16_t hue, uint16_t saturation, uint16_t addr)
+{
+    esp_ble_mesh_client_common_param_t common = {0};
+    esp_ble_mesh_light_client_set_state_t set = {0};
+    esp_err_t err;
+
+    if (app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED) {
+        ESP_LOGE(TAG, "Cannot send hsl Set: AppKey has not been bound yet!");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Sending hsl Set: hue=%d, sat=%d, addr=0x%04X, net_idx=0x%04x, app_idx=0x%04x",
+             hue, saturation, addr, app_state.net_idx, app_state.app_idx);
+
+    common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET_UNACK;
+    common.model = light_client.model;
+    common.ctx.net_idx = app_state.net_idx;
+    common.ctx.app_idx = app_state.app_idx;
+    common.ctx.addr = addr;
+    common.ctx.send_ttl = 7;
+    common.ctx.send_rel = false;
+    common.msg_timeout = 0;
+    common.msg_role = ROLE_NODE;
+
+    set.hsl_set.op_en = false;
+    set.hsl_set.hsl_lightness = 70;
+    set.hsl_set.hsl_hue = hue;
+    set.hsl_set.hsl_saturation = saturation;
+    set.hsl_set.tid = app_state.tid++;
+
+    err = esp_ble_mesh_light_client_set_state(&common, &set);
+    if (err) {
+        ESP_LOGE(TAG, "Failed to send hsl Set message (err %d)", err);
+    }
+}
+
 /* --- MQTT Functions --- */
 
 void refresh_mqtt_subscriptions(void)
@@ -497,7 +541,7 @@ void refresh_mqtt_subscriptions(void)
     }
 }
 
-static char *create_ha_discovery_payload(const char *lamp_name, const char *base_topic, const char *unique_id)
+static char *create_ha_discovery_payload(const LampInfo *lamp, const char *base_topic)
 {
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) {
@@ -512,13 +556,18 @@ static char *create_ha_discovery_payload(const char *lamp_name, const char *base
     cJSON_AddStringToObject(root, "stat_t", "~/state");
     cJSON_AddStringToObject(root, "schema", "json");
     cJSON_AddTrueToObject(root, "brightness");
-    cJSON_AddNumberToObject(root, "bri_scl", 50);
-    
-    cJSON_AddStringToObject(root, "uniq_id", unique_id);
+    // Use the lamp's specific brightness scaling
+    cJSON_AddNumberToObject(root, "bri_scl", lamp->brightness_scaling);
+
+    // Conditionally add color support
+    if (lamp->supports_color) {
+        cJSON_AddStringToObject(root,"sup_clrm","hs");
+    }
+    cJSON_AddStringToObject(root, "uniq_id", lamp->address);
 
     cJSON *dev = cJSON_CreateObject();
-    cJSON_AddStringToObject(dev, "name", lamp_name);
-    cJSON_AddStringToObject(dev, "identifiers", unique_id);
+    cJSON_AddStringToObject(dev, "name", lamp->name);
+    cJSON_AddStringToObject(dev, "identifiers", lamp->address);
     cJSON_AddStringToObject(dev, "manufacturer", "Espressif");
     cJSON_AddStringToObject(dev, "model", "BLE Mesh Lamp");
     cJSON_AddItemToObject(root, "dev", dev);
@@ -540,7 +589,7 @@ void publish_ha_discovery_messages(void)
         snprintf(base_topic, sizeof(base_topic), "homeassistant/light/%s", lamps[i].name);
         snprintf(config_topic, sizeof(config_topic), "homeassistant/light/%s/config", lamps[i].name);
 
-        char *payload = create_ha_discovery_payload(lamps[i].name, base_topic, lamps[i].address);
+        char *payload = create_ha_discovery_payload(&lamps[i], base_topic);
         if (payload) {
             ESP_LOGI(TAG, "Publishing to %s", config_topic);
             esp_mqtt_client_publish(mqtt_client, config_topic, payload, 0, 1, true);
@@ -573,6 +622,10 @@ static void handle_lamp_command(esp_mqtt_event_handle_t event)
         ESP_LOGE(TAG, "Failed to parse command JSON");
         return;
     }
+    // else
+    // {
+    //     ESP_LOG(TAG, "Got json: %s",cJSON_Print(json));
+    // }
 
     char state_topic[256];
     snprintf(state_topic, sizeof(state_topic), "homeassistant/light/%s/state", lamp_name);
@@ -580,8 +633,22 @@ static void handle_lamp_command(esp_mqtt_event_handle_t event)
 
     const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(json, "brightness");
     const cJSON *state = cJSON_GetObjectItemCaseSensitive(json, "state");
+    const cJSON *temp = cJSON_GetObjectItemCaseSensitive(json, "color");
+    const cJSON *hue = cJSON_GetObjectItemCaseSensitive(temp, "h");
+    const cJSON *sat = cJSON_GetObjectItemCaseSensitive(temp, "s");
 
     // Prioritize brightness command, as it implies the light should be on.
+    if(cJSON_IsNumber(hue) && cJSON_IsNumber(sat))
+    {
+        int huenum = hue->valueint;
+        int satnum = sat->valueint;
+        uint16_t hue16 = (uint16_t)huenum;
+        uint16_t sat16 = (uint16_t)satnum;
+        ble_mesh_send_hsl_set(hue16,sat16,addr);
+        snprintf(state_payload, sizeof(state_payload), "{\"state\":\"ON\", \"color\":{\"h\":%d,\"s\"%d}:}", hue16,sat16);
+        esp_mqtt_client_publish(mqtt_client, state_topic, state_payload, 0, 0, false);
+
+    }
     if (cJSON_IsNumber(brightness)) {
         int bri_ha = brightness->valueint; // HA brightness 0-255
         
