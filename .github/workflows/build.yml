@@ -26,11 +26,12 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Set Target
-        run: idf.py set-target ${{ matrix.target }}
-
-      - name: Build
-        run: idf.py build
+      - name: Build Firmware
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
 
       - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
