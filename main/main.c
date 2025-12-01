@@ -64,6 +64,7 @@
 #include "http_server.h"
 #include "cJSON.h"
 #include "main.h"
+#include "wifi_setup.h"
 
 /* --- Macros and Constants --- */
 
@@ -656,76 +657,6 @@ static void mqtt_app_start(void)
     esp_mqtt_client_start(client);
 }
 
-
-/* --- Wi-Fi Functions --- */
-
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                               int32_t event_id, void* event_data)
-{
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < ESP_MAXIMUM_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "Retrying to connect to the AP");
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-        }
-        ESP_LOGE(TAG, "Failed to connect to the AP");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
-
-void wifi_init_sta(void)
-{
-    s_wifi_event_group = xEventGroupCreate();
-
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = ESP_WIFI_SSID,
-            .password = ESP_WIFI_PASS,
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-        },
-    };
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
-
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            portMAX_DELAY);
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "Connected to AP SSID: %s", ESP_WIFI_SSID);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGE(TAG, "Failed to connect to SSID: %s", ESP_WIFI_SSID);
-    } else {
-        ESP_LOGE(TAG, "UNEXPECTED WIFI EVENT");
-    }
-}
-
-
 /* --- Main Application Entry --- */
 
 void app_main(void)
@@ -746,8 +677,15 @@ void app_main(void)
     // Initialize the lamp storage system from NVS
     lamp_nvs_init();
 
-    // Connect to Wi-Fi
-    wifi_init_sta();
+    // --- WI-FI SETUP ---
+    // Try to connect. If it fails, it will start the AP and return ESP_FAIL.
+    if (wifi_setup_init() != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi connection failed or not configured.");
+        ESP_LOGW(TAG, "Entering Setup Mode. Connect to Wi-Fi 'LEDVANCE_Setup' and visit 192.168.4.1");
+        // We return here to stop the main application (MQTT, Mesh, etc.) from running
+        // while the user is configuring the device.
+        return; 
+    }
 
     // Initialize Bluetooth and BLE Mesh
     err = bluetooth_init();
