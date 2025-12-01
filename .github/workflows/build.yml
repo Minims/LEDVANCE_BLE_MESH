@@ -1,1 +1,43 @@
+name: Build ESP-IDF Project
 
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # List the targets you want to build for here
+        target: [esp32, esp32c3, esp32c6, esp32s3]
+    
+    # Use the official Espressif IDF Docker image
+    # 'latest' usually points to the latest stable release (currently v5.x)
+    container: espressif/idf:latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Set Target
+        run: idf.py set-target ${{ matrix.target }}
+
+      - name: Build
+        run: idf.py build
+
+      - name: Upload Firmware Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}
+          path: |
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/*.bin
+            build/*.elf
