@@ -31,13 +31,13 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_event.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_mac.h"
 
 /* Wi-Fi & Networking */
-#include "esp_wifi.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "lwip/sockets.h"
@@ -68,13 +68,18 @@
 
 /* --- Macros and Constants --- */
 
+// Static buffers to hold MQTT config to ensure they persist
+static char s_mqtt_url[128] = {0};
+static char s_mqtt_user[64] = {0};
+static char s_mqtt_pass[64] = {0};
+
 // General
 #define TAG "BLE_MESH_GATEWAY"
 #define CID_ESP 0x02E5
 
 // Wi-Fi Configuration (from menuconfig)
-#define ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
-#define ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
+//#define ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
+//#define ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
 #define ESP_MAXIMUM_RETRY  CONFIG_ESP_MAXIMUM_RETRY
 
 // MQTT Configuration (from menuconfig)
@@ -96,10 +101,6 @@ static uint8_t dev_uuid[16] = { 0xcc, 0xcc };
 static esp_ble_mesh_client_t onoff_client;
 static esp_ble_mesh_client_t level_client;
 static esp_ble_mesh_client_t light_client;
-
-// Wi-Fi
-static EventGroupHandle_t s_wifi_event_group;
-static int s_retry_num = 0;
 
 // MQTT
 static esp_mqtt_client_handle_t mqtt_client = NULL;
@@ -714,10 +715,42 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 static void mqtt_app_start(void)
 {
+    // Initialize with defaults from SDKConfig
+    strncpy(s_mqtt_url, CONFIG_BROKER_URL, sizeof(s_mqtt_url) - 1);
+    strncpy(s_mqtt_user, CONFIG_USERNAME_MQTT, sizeof(s_mqtt_user) - 1);
+    strncpy(s_mqtt_pass, CONFIG_PASSWORD_MQTT, sizeof(s_mqtt_pass) - 1);
+
+    // Try to load overrides from NVS
+    nvs_handle_t mqtt_nvs_handle;
+    esp_err_t err = nvs_open("mqtt_config", NVS_READONLY, &mqtt_nvs_handle);
+    if (err == ESP_OK) {
+        size_t len;
+        
+        len = sizeof(s_mqtt_url);
+        if (nvs_get_str(mqtt_nvs_handle, "broker_url", s_mqtt_url, &len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded MQTT URL from NVS: %s", s_mqtt_url);
+        }
+
+        len = sizeof(s_mqtt_user);
+        if (nvs_get_str(mqtt_nvs_handle, "username", s_mqtt_user, &len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded MQTT User from NVS");
+        }
+
+        len = sizeof(s_mqtt_pass);
+        if (nvs_get_str(mqtt_nvs_handle, "password", s_mqtt_pass, &len) == ESP_OK) {
+             ESP_LOGI(TAG, "Loaded MQTT Password from NVS");
+        }
+        
+        nvs_close(mqtt_nvs_handle);
+    } else {
+        ESP_LOGW(TAG, "No NVS MQTT config found, using defaults");
+    }
+
+
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = MQTT_BROKER_URL,
-        .credentials.username = MQTT_USER,
-        .credentials.authentication.password = MQTT_PASS,
+        .broker.address.uri = s_mqtt_url,
+        .credentials.username = s_mqtt_user,
+        .credentials.authentication.password = s_mqtt_pass,
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
