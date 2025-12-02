@@ -5,7 +5,13 @@ on:
     branches:
       - dev
   pull_request:
-
+  
+# Grant permissions for GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  
 jobs:
   build:
     name: Build for ${{ matrix.target }}
@@ -32,13 +38,64 @@ jobs:
           . $IDF_PATH/export.sh
           idf.py set-target ${{ matrix.target }}
           idf.py build
+          idf.py merge-bin # Creates build/merged-binary.bin
 
-      - name: Upload Firmware Artifacts
+      - name: Upload Single Binary
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.target }}
-          path: |
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
-            build/*.bin
-            build/*.elf
+          path: build/merged-binary.bin
+  deploy-web:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy to GitHub Pages
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Setup Web Directory
+        run: |
+          mkdir -p public/firmware
+          cp web/index.html public/index.html
+
+      - name: Process Firmware & Generate Manifests
+        run: |
+          for chip in esp32 esp32c3 esp32c6 esp32s3; do
+            echo "Processing $chip..."
+            mkdir -p public/firmware/$chip
+            
+            # Move and rename the single binary
+            cp artifacts/firmware-$chip/merged-binary.bin public/firmware/$chip/firmware.bin
+            
+            # Generate simple manifest (offset is always 0x0 for merged bin)
+            cat <<EOF > public/firmware/$chip/manifest.json
+          {
+            "name": "LEDVANCE BLE Mesh ($chip)",
+            "version": "latest",
+            "builds": [
+              {
+                "chipFamily": "$chip",
+                "parts": [
+                  { "path": "firmware.bin", "offset": 0 }
+                ]
+              }
+            ]
+          }
+          EOF
+          done
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'public'
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
