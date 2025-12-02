@@ -18,7 +18,7 @@ jobs:
     
     # Use the official Espressif IDF Docker image
     # 'latest' usually points to the latest stable release (currently v5.x)
-    container: espressif/idf:latest
+    container: espressif/idf:release-v5.4
 
     steps:
       - name: Checkout Repository
