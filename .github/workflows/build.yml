@@ -69,17 +69,26 @@ jobs:
             echo "Processing $chip..."
             mkdir -p public/firmware/$chip
             
+            # Map build target to correct ESP Web Tools chipFamily name
+            case $chip in
+              esp32)   FAMILY="ESP32" ;;
+              esp32c3) FAMILY="ESP32-C3" ;;
+              esp32c6) FAMILY="ESP32-C6" ;;
+              esp32s3) FAMILY="ESP32-S3" ;;
+              *)       FAMILY="ESP32" ;; # Default fallback
+            esac
+
             # Move and rename the single binary
             cp artifacts/firmware-$chip/merged-binary.bin public/firmware/$chip/firmware.bin
             
-            # Generate simple manifest (offset is always 0x0 for merged bin)
+            # Generate manifest with correct chipFamily
             cat <<EOF > public/firmware/$chip/manifest.json
           {
-            "name": "LEDVANCE BLE Mesh ($chip)",
+            "name": "LEDVANCE BLE Mesh ($FAMILY)",
             "version": "latest",
             "builds": [
               {
-                "chipFamily": "$chip",
+                "chipFamily": "$FAMILY",
                 "parts": [
                   { "path": "firmware.bin", "offset": 0 }
                 ]
