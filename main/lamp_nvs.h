@@ -8,11 +8,18 @@
 #define MAX_LAMP_ADDR_LEN 8
 
 // The core struct remains the same.
-typedef struct {
+typedef struct
+{
     char name[MAX_LAMP_NAME_LEN];
     char address[MAX_LAMP_ADDR_LEN];
     bool supports_color;       // Flag to indicate if the lamp supports color (HS)
+    bool supports_ctl;         // Flag to indicate if the lamp supports color temperature (CTL)
+    bool use_ack;              // Flag to indicate if the lamp should use ACK (true) or UNACK (false, default)
     int brightness_scaling;    // Value to scale brightness (e.g., 50, 100, 255)
+    uint16_t min_mirek;        // Minimum temperature in mirek (800-20000, default 800)
+    uint16_t max_mirek;        // Maximum temperature in mirek (800-20000, default 20000)
+    uint16_t last_brightness;  // Last known brightness value (for CTL temp-only changes)
+    uint16_t last_temperature; // Last known temperature value in mirek (for brightness-only changes)
 } LampInfo;
 
 /**
@@ -54,7 +61,7 @@ esp_err_t update_lamp_info(const char *original_name, const LampInfo *updated_la
  * @param[out] count Pointer to an integer that will be filled with the number of lamps.
  * @return A const pointer to the array of LampInfo structs. Do not modify this array directly.
  */
-const LampInfo* get_all_lamps(int* count);
+const LampInfo *get_all_lamps(int *count);
 
 /**
  * @brief Finds a lamp by its name from the in-memory cache.
