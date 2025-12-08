@@ -11,7 +11,7 @@ It is based on the On-Off client example from the [ESP idf examples](https://git
 The easiest way to install is using the web-based installer. No software required.
 
 1.  **Open the Web Flasher:**
-    Go to: `https://ultraworg.github.io/LEDVANCE_BLE_MESH/`
+    Go to: https://ultraworg.github.io/LEDVANCE_BLE_MESH/
 
 2.  **Connect your Device:**
     Plug your ESP32, ESP32-C3, ESP32-C6, or ESP32-S3 into your computer via USB.
