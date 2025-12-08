@@ -114,7 +114,6 @@ Before using the gateway, you must provision your Ledvance lamps using the [nRF 
         - Generic OnOff Client
         - Generic Level Client
         - Light Lightness Client
-        - Light HSL Client
 
 ### 3. Add Lamps to Gateway
 1.  Open the ESP's web interface (`http://<DEVICE_IP>/`).

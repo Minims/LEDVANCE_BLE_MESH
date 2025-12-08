@@ -4,7 +4,21 @@ on:
   push:
     branches:
       - dev
+    paths:
+      - 'main/**'
+      - 'web/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig.defaults'
+      - 'partitions.csv'
+      - '.github/workflows/build.yml'
   pull_request:
+    paths:
+      - 'main/**'
+      - 'web/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig.defaults'
+      - 'partitions.csv'
+      - '.github/workflows/build.yml'
   
 # Grant permissions for GitHub Pages
 permissions:
