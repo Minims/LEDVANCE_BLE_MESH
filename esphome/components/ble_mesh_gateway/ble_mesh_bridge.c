@@ -263,27 +263,6 @@ void ble_mesh_bridge_send_level(uint16_t addr, uint16_t level) {
   esp_ble_mesh_light_client_set_state(&common, &set);
 }
 
-void ble_mesh_bridge_send_generic_level(uint16_t addr, int16_t level) {
-  if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
-    return;
-
-  esp_ble_mesh_generic_client_set_state_t set = {0};
-  esp_ble_mesh_client_common_param_t common = {0};
-
-  common.opcode = ESP_BLE_MESH_MODEL_OP_GEN_LEVEL_SET_UNACK;
-  common.model = level_client.model;
-  common.ctx.net_idx = s_app_state.net_idx;
-  common.ctx.app_idx = s_app_state.app_idx;
-  common.ctx.addr = addr;
-  common.ctx.send_ttl = 7;
-
-  set.level_set.op_en = false;
-  set.level_set.level = level;
-  set.level_set.tid = s_app_state.tid++;
-
-  esp_ble_mesh_generic_client_set_state(&common, &set);
-}
-
 void ble_mesh_bridge_send_hsl(uint16_t addr, uint16_t lightness, uint16_t hue,
                               uint16_t saturation) {
   if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
