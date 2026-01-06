@@ -1,129 +1,168 @@
-LEDVANCE ESP BLE Mesh Client Model
-========================
+# LEDVANCE ESP BLE Mesh Gateway
 
-This code can be used to program an ESP board to act as an intermediate between Home Assistant and LEDVANCE Bluetooth bulbs.
-It supports On/Off, HSL color and setting the brightness level.
+Control **LEDVANCE Bluetooth Mesh bulbs** from [Home Assistant](https://home-assistant.io) using an ESP32 as a gateway.
 
-It is based on the On-Off client example from the [ESP idf examples](https://github.com/espressif/esp-idf/tree/a5b261f/examples/bluetooth/esp_ble_mesh/onoff_models/onoff_server).
-
-## 🚀 Easy Installation (Web Flasher)
-
-The easiest way to install is using the web-based installer. No software required.
-
-1.  **Open the Web Flasher:**
-    Go to: https://ultraworg.github.io/LEDVANCE_BLE_MESH/
-
-2.  **Connect your Device:**
-    Plug your ESP32, ESP32-C3, ESP32-C6, or ESP32-S3 into your computer via USB.
-
-3.  **Flash Firmware:**
-    - Select your chip type from the dropdown menu.
-    - Click **"Install"**.
-    - Select the correct USB port and follow the on-screen instructions.
-    - Holding the boot button on the ESP might be required before hitting install
+Supports: **On/Off**, **Brightness**, **HSL Color**.
 
 ---
 
-## ⚙️ Initial Configuration
+## 📦 Two Variants
 
-After flashing (via Web or Manual method), the device needs to be connected to your network and MQTT broker.
-
-### 1. Wi-Fi Setup
-On the first boot (or if the configured Wi-Fi is unavailable), the device will enter **Setup Mode**.
-
-1.  Look for a Wi-Fi Hotspot named **`LEDVANCE_Setup`** on your phone or computer and connect to it.
-2.  A configuration page should open automatically. If not, visit `http://192.168.4.1` in your browser.
-3.  Enter your home **SSID** and **Password**.
-4.  Click **Connect**. The device will restart and connect to your local network.
-
-### 2. MQTT Setup
-Once the device is connected to your Wi-Fi:
-
-1.  Find the device's IP address (check your router's client list or the serial monitor).
-2.  Open your browser and navigate to `http://<DEVICE_IP>/`.
-3.  Click the **System Configuration** button at the top of the page.
-4.  Enter your **MQTT Broker URL** (e.g., `mqtt://192.168.1.50:1883`), **Username**, and **Password**.
-5.  (Optional) Click **Test Connection** to verify your settings.
-6.  Click **Save & Restart**.
+| Variant | Description | Best For |
+|---------|-------------|----------|
+| **Standalone (ESP-IDF)** | Native ESP-IDF with web UI, MQTT integration | Full-featured self-contained gateway |
+| **ESPHome Component** | Integrates directly with ESPHome/Home Assistant | Home Assistant setups with existing ESPHome devices |
 
 ---
 
-## 🛠️ Advanced: Manual Flashing & Development
+## 🚀 Quick Start: Web Flasher (Standalone)
 
-If you prefer command-line tools or want to modify the code, you can use the methods below.
+The easiest way to install the **standalone** version:
 
-### Option A: Flash Pre-built Binaries with esptool
-You can download the latest compiled firmware from GitHub Actions and flash it manually using `esptool.py`.
+1. Open: **https://ultraworg.github.io/LEDVANCE_BLE_MESH/**
+2. Select your ESP32 variant and click **Install**
+3. Follow on-screen instructions
 
-1.  Go to the **Actions** tab in this repository.
-2.  Click on the latest successful workflow run.
-3.  Scroll down to **Artifacts** and download the `firmware-<chip>` zip file for your device (e.g., `firmware-esp32c3`).
-4.  Extract the zip file to find `merged-binary.bin`.
-5.  Flash it to offset `0x0`:
-
-    ```bash
-    # Install esptool if you haven't already
-    pip install esptool
-
-    # Flash (Replace PORT with your serial port, e.g., /dev/ttyUSB0 or COM3)
-    esptool.py -p PORT -b 460800 write_flash 0x0 merged-binary.bin
-    ```
-
-### Option B: Build from Source (ESP-IDF)
-To modify the code and build locally:
-
-1.  **Install ESP-IDF:** Follow the [official Espressif installation guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html).
-2.  **Clone the Repo:**
-    ```bash
-    git clone [https://github.com/](https://github.com/)<YOUR-USERNAME>/<REPO-NAME>.git
-    cd <REPO-NAME>
-    ```
-3.  **Build and Flash:**
-    ```bash
-    # Set your target chip (esp32, esp32c3, esp32s3, esp32c6)
-    idf.py set-target esp32c3
-
-    # Build the firmware
-    idf.py build
-
-    # Flash and monitor serial output
-    idf.py flash monitor
-    ```
+See [Standalone Setup](#standalone-setup) below for configuration.
 
 ---
 
-## 📝 Usage Instructions
+## 🏠 ESPHome Component
 
-### 1. Provision the Lamps
-Before using the gateway, you must provision your Ledvance lamps using the [nRF Mesh App](https://www.nordicsemi.com/Products/Development-tools/nrf-mesh/getstarted).
+### Installation
 
-1.  **Reset Lamps:** Ensure lamps are in pairing mode (usually by toggling power 5 times).
-2.  **Provision:** Use the **nRF Mesh App** (Android/iOS) to provision each lamp.
-3.  **Assign App Keys:**
-    - In the App, go to the lamp's "Elements".
-    - Bind the same **Application Key** to these models:
-        - Generic OnOff Server
-        - Generic Level Server
-        - Light Lightness Server
-        - Light HSL Server
-4.  **Record Address:** Note down the **Unicast Address** (e.g., `0x0002`) for each lamp.
+Add to your ESPHome configuration:
 
-### 2. Provision the ESP Gateway
-1.  **Provision:** Use the nRF Mesh App to provision the ESP device itself.
-2.  **Bind Keys:** Bind the **same Application Key** (used for lamps) to:
-        - Generic OnOff Client
-        - Generic Level Client
-        - Light Lightness Client
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/Ultraworg/LEDVANCE_BLE_MESH
+      ref: main
+    components: [ble_mesh_gateway]
+    refresh: 0s
 
-### 3. Add Lamps to Gateway
-1.  Open the ESP's web interface (`http://<DEVICE_IP>/`).
-2.  Enter the **Name** and **Unicast Address** (from Step 1) for each lamp.
-3.  Click "Add Lamp".
-4.  **Restart:** Click "Restart Device" or cycle power to apply the new subscriptions.
+ble_mesh_gateway:
+  id: mesh_gateway
+
+esp32:
+  board: esp32dev  # or esp32-c6-devkitc-1 for C6
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_BLE_MESH: "y"
+      CONFIG_BLE_MESH_NODE: "y"
+      CONFIG_BLE_MESH_PB_GATT: "y"
+      CONFIG_BLE_MESH_PB_ADV: "y"
+      CONFIG_BLE_MESH_GENERIC_CLIENT: "y"
+      CONFIG_BLE_MESH_LIGHTING_CLIENT: "y"
+      CONFIG_BLE_MESH_GENERIC_ONOFF_CLI: "y"
+      CONFIG_BLE_MESH_GENERIC_LEVEL_CLI: "y"
+      CONFIG_BLE_MESH_LIGHT_LIGHTNESS_CLI: "y"
+      CONFIG_BT_ENABLED: "y"
+      CONFIG_BLE_MESH_SETTINGS: "y"
+```
+
+### Adding Lamps
+
+Create template outputs for each lamp using its unicast address:
+
+```yaml
+output:
+  - platform: template
+    id: mesh_output_lamp1
+    type: float
+    write_action:
+      - lambda: |-
+          static uint32_t last = 0;
+          id(mesh_gateway).control_light(0x0020, state, last, 50);
+
+light:
+  - platform: monochromatic
+    name: "Living Room Lamp"
+    output: mesh_output_lamp1
+    gamma_correct: 1.0
+    default_transition_length: 0s
+```
+
+**Parameters:**
+- `0x0020` - Lamp's unicast address (from nRF Mesh app)
+- `state` - Brightness (0.0-1.0)
+- `last` - Rate limiting state (static variable)
+- `50` - Max brightness level (50 for LEDVANCE, 255 for standard)
+
+### HSL Color Control
+
+For color-changing lamps, use `control_light_hsl`:
+
+```yaml
+- lambda: |-
+    static uint32_t last = 0;
+    id(mesh_gateway).control_light_hsl(0x0020, brightness, hue, saturation, last, 50);
+```
+
+### Example Configs
+
+See [`esphome/gateway.yaml`](esphome/gateway.yaml) (ESP32) and [`esphome/gateway-c6.yaml`](esphome/gateway-c6.yaml) (ESP32-C6).
 
 ---
 
-## 🏠 Home Assistant Integration
+## ⚙️ Standalone Setup
 
-The gateway automatically publishes discovery messages to Home Assistant.
-Once the entity appears in Home Assistant, it should work.
+### Initial Configuration
+
+1. **Wi-Fi Setup**: Connect to **`LEDVANCE_Setup`** hotspot, configure at `http://192.168.4.1`
+2. **MQTT Setup**: Navigate to device IP, click **System Configuration**, enter MQTT broker details
+
+### Pre-built Binaries
+
+1. Go to **Actions** tab → download `firmware-<chip>.zip`
+2. Flash with: `esptool.py -p PORT write_flash 0x0 merged-binary.bin`
+
+### Build from Source
+
+```bash
+idf.py set-target esp32c3
+idf.py build
+idf.py flash monitor
+```
+
+---
+
+## 📝 Provisioning Lamps
+
+Before using either variant, provision your lamps with the **nRF Mesh App**:
+
+1. **Reset lamp** (toggle power 5x)
+2. **Provision** with nRF Mesh app
+3. **Bind Application Key** to these models:
+   - Generic OnOff Server
+   - Generic Level Server  
+   - Light Lightness Server
+   - Light HSL Server (for color)
+4. **Note the Unicast Address** (e.g., `0x0002`)
+5. **Provision ESP gateway** and bind same App Key to:
+   - Generic OnOff Client
+   - Generic Level Client
+   - Light Lightness Client
+
+---
+
+## 🔧 Supported Hardware
+
+- ESP32 (standard)
+- ESP32-C3
+- ESP32-C6
+- ESP32-S3
+
+---
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Credits
+
+Based on [ESP-IDF BLE Mesh examples](https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/esp_ble_mesh).
