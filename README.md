@@ -65,6 +65,8 @@ esp32:
 
 ### Adding Lamps
 
+#### Option A: Inline YAML (requires ESP recompilation for new lamps)
+
 Create template outputs for each lamp using its unicast address:
 
 ```yaml
@@ -85,11 +87,44 @@ light:
     default_transition_length: 0s
 ```
 
+#### Option B: Service-Based (recommended - no ESP recompilation)
+
+Add services to your ESPHome config once:
+
+```yaml
+api:
+  services:
+    - service: set_mesh_light
+      variables:
+        address: int
+        brightness: float
+        max_level: int
+      then:
+        - lambda: |-
+            static std::map<uint16_t, uint32_t> last_sends;
+            id(mesh_gateway).control_light(address, brightness, last_sends[address], max_level);
+
+    - service: set_mesh_light_hsl
+      variables:
+        address: int
+        brightness: float
+        hue: float
+        saturation: float
+        max_level: int
+      then:
+        - lambda: |-
+            static std::map<uint16_t, uint32_t> last_sends;
+            id(mesh_gateway).control_light_hsl(address, brightness, hue, saturation, last_sends[address], max_level);
+```
+
+Then define lamps in Home Assistant's `configuration.yaml` - see [`esphome/homeassistant_example.yaml`](esphome/homeassistant_example.yaml).
+
 **Parameters:**
-- `0x0020` - Lamp's unicast address (from nRF Mesh app)
-- `state` - Brightness (0.0-1.0)
-- `last` - Rate limiting state (static variable)
-- `50` - Max brightness level (50 for LEDVANCE, 255 for standard)
+- `address` - Lamp's unicast address (decimal, e.g., 32 = 0x0020)
+- `brightness` - 0.0-1.0
+- `hue` - 0-360 (for HSL)
+- `saturation` - 0.0-1.0 (for HSL)
+- `max_level` - 50 for LEDVANCE, 255 for standard
 
 ### HSL Color Control
 
