@@ -1,0 +1,163 @@
+esphome:
+  name: ble-mesh-gateway-c6
+  friendly_name: BLE Mesh Gateway C6
+  # Workaround for RISC-V/ESP32-C6 linker bug with API services
+  # See: https://github.com/esphome/issues/issues/3564
+  platformio_options:
+    board_build.extra_flags:
+      - "-include \"src/fix.h\""
+  includes:
+    - fix.h
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+ble_mesh_gateway:
+  id: mesh_gateway
+
+esp32:
+  board: esp32-c6-devkitc-1
+  variant: esp32c6
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_BLE_MESH: "y"
+      CONFIG_BLE_MESH_NODE: "y"
+      CONFIG_BLE_MESH_PB_GATT: "y"
+      CONFIG_BLE_MESH_PB_ADV: "y"
+      CONFIG_BLE_MESH_GENERIC_SERVER: "y"
+      CONFIG_BLE_MESH_GENERIC_CLIENT: "y"
+      CONFIG_BLE_MESH_LIGHTING_CLIENT: "y"
+      CONFIG_BLE_MESH_GENERIC_ONOFF_CLI: "y"
+      CONFIG_BLE_MESH_GENERIC_LEVEL_CLI: "y"
+      CONFIG_BLE_MESH_LIGHT_LIGHTNESS_CLI: "y"
+      CONFIG_BLE_MESH_NET_BUF_COUNT: "160"
+      CONFIG_BLE_MESH_ADV_BUF_COUNT: "160"
+      CONFIG_BLE_MESH_RX_SEG_MAX: "20"
+      CONFIG_BLE_MESH_TX_SEG_MAX: "20"
+      CONFIG_BLE_MESH_RELAY_MSG_COUNT: "20"
+      CONFIG_BT_ENABLED: "y"
+      CONFIG_BLE_MESH_SETTINGS: "y"
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+bluetooth_proxy:
+  active: true
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+# RISC-V fix applied via fix.h - services now work on ESP32-C6
+api:
+  password: ""
+  services:
+    # Service for brightness-only lamps (monochromatic)
+    # address: mesh unicast address (decimal), brightness: 0-100, max_level: typically 50
+    - service: set_mesh_light
+      variables:
+        address: int
+        brightness: int
+        max_level: int
+      then:
+        - lambda: |-
+            static std::map<uint16_t, uint32_t> last_sends;
+            float bright_f = brightness / 100.0f;
+            id(mesh_gateway).control_light(address, bright_f, last_sends[address], max_level);
+
+    # Service for HSL color lamps
+    # brightness: 0-100, hue: 0-360, saturation: 0-100
+    - service: set_mesh_light_hsl
+      variables:
+        address: int
+        brightness: int
+        hue: int
+        saturation: int
+        max_level: int
+      then:
+        - lambda: |-
+            static std::map<uint16_t, uint32_t> last_sends;
+            float bright_f = brightness / 100.0f;
+            float hue_f = (float)hue;
+            float sat_f = saturation / 100.0f;
+            id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
+
+# OTA Updates
+ota:
+  - platform: esphome
+    password: ""
+
+# WiFi Configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Fallback AP
+  ap:
+    ssid: "BLE Mesh Gateway C6 Fallback"
+    password: ""
+
+output:
+  - platform: template
+    id: mesh_output_0020
+    type: float
+    write_action:
+      - lambda: |
+          static uint32_t last = 0;
+          id(mesh_gateway).control_light(0x0020, state, last, 50);
+
+  - platform: template
+    id: mesh_output_0015
+    type: float
+    write_action:
+      - lambda: |
+          static uint32_t last = 0;
+          id(mesh_gateway).control_light(0x0015, state, last, 50);
+  - platform: template
+    id: mesh_output_0017
+    type: float
+    write_action:
+      - lambda: |
+          static uint32_t last = 0;
+          id(mesh_gateway).control_light(0x0017, state, last, 50);
+  - platform: template
+    id: mesh_output_0018
+    type: float
+    write_action:
+      - lambda: |
+          static uint32_t last = 0;
+          id(mesh_gateway).control_light(0x0018, state, last, 50);
+
+light:
+  - platform: monochromatic
+    name: "Tischlampe"
+    id: mesh_light_0020
+    output: mesh_output_0020
+    gamma_correct: 1.0
+    default_transition_length: 0s
+
+  - platform: monochromatic
+    name: "Flur"
+    id: mesh_light_0015
+    output: mesh_output_0015
+    gamma_correct: 1.0
+    default_transition_length: 0s
+
+  - platform: monochromatic
+    name: "Wohnzimmer"
+    id: mesh_light_0017
+    output: mesh_output_0017
+    gamma_correct: 1.0
+    default_transition_length: 0s
+  
+  - platform: monochromatic
+    name: "Stehlampe"
+    id: mesh_light_0018
+    output: mesh_output_0018
+    gamma_correct: 1.0
+    default_transition_length: 0s

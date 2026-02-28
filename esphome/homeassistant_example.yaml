@@ -1,0 +1,85 @@
+# Home Assistant Configuration for BLE Mesh Lamps
+# 
+# Add this to your Home Assistant configuration.yaml
+# Replace the service name with your ESPHome device name
+# (e.g., esphome.ble_mesh_gateway_c6_test_set_mesh_light)
+
+# Helper for tracking on/off state (optional, for UI)
+input_boolean:
+  mesh_tischlampe_state:
+    name: "Tischlampe State"
+
+input_number:
+  mesh_tischlampe_brightness:
+    name: "Tischlampe Brightness"
+    min: 0
+    max: 255
+    step: 1
+
+# Template lights - add one per lamp
+light:
+  - platform: template
+    lights:
+      # Brightness-only lamp example
+      mesh_tischlampe:
+        friendly_name: "Tischlampe"
+        value_template: "{{ is_state('input_boolean.mesh_tischlampe_state', 'on') }}"
+        level_template: "{{ states('input_number.mesh_tischlampe_brightness') | int }}"
+        turn_on:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.mesh_tischlampe_state
+          - service: esphome.ble_mesh_gateway_c6_test_set_mesh_light
+            data:
+              address: 32  # 0x0020 in decimal
+              brightness: 1.0
+              max_level: 50
+        turn_off:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.mesh_tischlampe_state
+          - service: esphome.ble_mesh_gateway_c6_test_set_mesh_light
+            data:
+              address: 32
+              brightness: 0
+              max_level: 50
+        set_level:
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.mesh_tischlampe_brightness
+            data:
+              value: "{{ brightness }}"
+          - service: esphome.ble_mesh_gateway_c6_test_set_mesh_light
+            data:
+              address: 32
+              brightness: "{{ brightness / 255 }}"
+              max_level: 50
+
+      # HSL color lamp example
+      mesh_color_lamp:
+        friendly_name: "Color Lamp"
+        turn_on:
+          - service: esphome.ble_mesh_gateway_c6_test_set_mesh_light_hsl
+            data:
+              address: 33  # 0x0021
+              brightness: 1.0
+              hue: 0
+              saturation: 0
+              max_level: 50
+        turn_off:
+          - service: esphome.ble_mesh_gateway_c6_test_set_mesh_light_hsl
+            data:
+              address: 33
+              brightness: 0
+              hue: 0
+              saturation: 0
+              max_level: 50
+        set_level:
+          - service: esphome.ble_mesh_gateway_c6_test_set_mesh_light_hsl
+            data:
+              address: 33
+              brightness: "{{ brightness / 255 }}"
+              hue: 0
+              saturation: 0
+              max_level: 50
+        # For color control, use automations or scripts with hs_color

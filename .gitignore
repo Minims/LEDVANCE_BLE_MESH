@@ -6,3 +6,8 @@ sdkconfig.old
 sdkconfig.defaults
 .DS_Store
 .clangd
+venv/
+
+# ESPHome
+esphome/.esphome/
+esphome/secrets.yaml

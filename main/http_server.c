@@ -3,403 +3,273 @@
 #include "esp_log.h"
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include "cJSON.h"
 #include "main.h"
 #include "lamp_nvs.h"
-#include <ctype.h>
-
-static bool is_valid_hex_address(const char *addr) {
-    // Expect format 0xAAAA
-    if (addr == NULL || strlen(addr) < 3 || addr[0] != '0' || (addr[1] != 'x' && addr[1] != 'X')) {
-        return false;
-    }
-    for (int i = 2; i < strlen(addr); i++) {
-        if (!isxdigit((unsigned char)addr[i])) return false;
-    }
-    return true;
-}
+#include "mqtt_client.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #define TAG "HTTP_SERVER"
 
-// Helper function to parse URL-encoded form data
-static esp_err_t get_post_field(char *buf, const char *field, char *dest, int dest_len)
-{
-    const char *start = strstr(buf, field);
-    if (!start) {
-        return ESP_FAIL;
-    }
-    start += strlen(field); // Move pointer past "field="
+// --- Helper Functions ---
+static char from_hex(char ch) {
+    return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
+}
+
+static esp_err_t get_post_field(char *buf, const char *field, char *dest, int dest_len) {
+    char *start = strstr(buf, field);
+    if (!start) return ESP_FAIL;
+    start += strlen(field);
     char *end = strchr(start, '&');
-    size_t len;
-    if (end) {
-        len = end - start;
-    } else {
-        len = strlen(start);
+    if (!end) end = buf + strlen(buf);
+    int len = end - start;
+    int w = 0;
+    for (int r = 0; r < len && w < dest_len - 1; r++) {
+        if (start[r] == '+') dest[w++] = ' ';
+        else if (start[r] == '%' && r + 2 < len) {
+            dest[w++] = (from_hex(start[r+1]) << 4) | from_hex(start[r+2]);
+            r += 2;
+        } else dest[w++] = start[r];
     }
-
-    if (len >= dest_len) {
-        return ESP_FAIL; // Destination buffer too small
-    }
-
-    memcpy(dest, start, len);
-    dest[len] = '\0';
-    // Basic URL decoding for spaces ('+' -> ' ') and other chars might be needed for robustness
-    char *p = dest;
-    while ((p = strchr(p, '+')) != NULL) {
-        *p = ' ';
-    }
+    dest[w] = '\0';
     return ESP_OK;
 }
 
-/* An HTTP POST handler for adding a new lamp */
-static esp_err_t add_lamp_post_handler(httpd_req_t *req)
-{
-    char buf[256];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
+// --- MQTT Test Logic ---
+static EventGroupHandle_t s_mqtt_test_group;
+#define MQTT_TEST_CONNECTED_BIT BIT0
 
-    LampInfo new_lamp;
-    char scaling_buf[16];
-    char color_buf[4];
-
-    if (get_post_field(buf, "lamp_name=", new_lamp.name, sizeof(new_lamp.name)) != ESP_OK ||
-        get_post_field(buf, "lamp_address=", new_lamp.address, sizeof(new_lamp.address)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
-        return ESP_FAIL;
+static void mqtt_test_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+    if (event_id == MQTT_EVENT_CONNECTED) {
+        xEventGroupSetBits(s_mqtt_test_group, MQTT_TEST_CONNECTED_BIT);
     }
-    // Parse Color Support (Checkbox present = true, otherwise false)
-    if (get_post_field(buf, "lamp_color=", color_buf, sizeof(color_buf)) == ESP_OK) {
-        new_lamp.supports_color = true;
-    } else {
-        new_lamp.supports_color = false;
-    }
-    // Parse Brightness Scaling
-    if (get_post_field(buf, "lamp_scaling=", scaling_buf, sizeof(scaling_buf)) == ESP_OK) {
-        new_lamp.brightness_scaling = atoi(scaling_buf);
-    } else {
-        new_lamp.brightness_scaling = 100; // Default
-    }
-    //validate proper address format
-    if (!is_valid_hex_address(new_lamp.address)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Address Format. Use 0x0000 hex format.");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Adding lamp: Name='%s', Addr='%s', Color=%d, Scale=%d", 
-        new_lamp.name, new_lamp.address, new_lamp.supports_color, new_lamp.brightness_scaling);
-
-    esp_err_t err = add_lamp_info(&new_lamp);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Lamp added successfully.");
-        refresh_mqtt_subscriptions();
-        publish_ha_discovery_messages();
-    } else {
-        ESP_LOGE(TAG, "Failed to add lamp: %s", esp_err_to_name(err));
-    }
-
-    // Redirect back to the main page
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
 }
 
-/* An HTTP POST handler for removing a lamp */
-static esp_err_t remove_lamp_post_handler(httpd_req_t *req)
-{
-    char buf[100];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) { return ESP_FAIL; }
-    buf[ret] = '\0';
+static esp_err_t perform_mqtt_test(const char *url, const char *user, const char *pass) {
+    s_mqtt_test_group = xEventGroupCreate();
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = url,
+        .credentials.username = user,
+        .credentials.authentication.password = pass,
+    };
+    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    if (!client) return ESP_FAIL;
 
-    char lamp_name[MAX_LAMP_NAME_LEN];
-    if (get_post_field(buf, "lamp_name=", lamp_name, sizeof(lamp_name)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing lamp_name");
-        return ESP_FAIL;
-    }
+    esp_mqtt_client_register_event(client, MQTT_EVENT_CONNECTED, mqtt_test_handler, NULL);
+    esp_mqtt_client_start(client);
 
-    ESP_LOGI(TAG, "Removing lamp: Name='%s'", lamp_name);
-
-    esp_err_t err = remove_lamp_info_by_name(lamp_name);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Lamp removed successfully.");
-        refresh_mqtt_subscriptions();
-        publish_ha_discovery_messages();
-    } else {
-        ESP_LOGE(TAG, "Failed to remove lamp: %s", esp_err_to_name(err));
-    }
-
-    // Redirect back to the main page
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-/* An HTTP POST handler for updating a lamp */
-static esp_err_t update_lamp_post_handler(httpd_req_t *req)
-{
-    char buf[256];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) { return ESP_FAIL; }
-    buf[ret] = '\0';
-
-    char original_name[MAX_LAMP_NAME_LEN];
-    LampInfo updated_lamp;
-    char scaling_buf[16];
-    char color_buf[4];
-
-    if (get_post_field(buf, "original_name=", original_name, sizeof(original_name)) != ESP_OK ||
-        get_post_field(buf, "lamp_name=", updated_lamp.name, sizeof(updated_lamp.name)) != ESP_OK ||
-        get_post_field(buf, "lamp_address=", updated_lamp.address, sizeof(updated_lamp.address)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form data");
-        return ESP_FAIL;
-    }
-    // Parse Color Support
-    if (get_post_field(buf, "lamp_color=", color_buf, sizeof(color_buf)) == ESP_OK) {
-        updated_lamp.supports_color = true;
-    } else {
-        updated_lamp.supports_color = false;
-    }
-    // Parse Brightness Scaling
-    if (get_post_field(buf, "lamp_scaling=", scaling_buf, sizeof(scaling_buf)) == ESP_OK) {
-        updated_lamp.brightness_scaling = atoi(scaling_buf);
-    } else {
-        updated_lamp.brightness_scaling = 100; // Default
-    }
-    //validate proper address format
-    if (!is_valid_hex_address(updated_lamp.address)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Address Format. Use 0x0000 hex format.");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Updating lamp '%s' to Name='%s', Addr='%s', Color=%d, Scale=%d", 
-             original_name, updated_lamp.name, updated_lamp.address, updated_lamp.supports_color, updated_lamp.brightness_scaling);
-
-    esp_err_t err = update_lamp_info(original_name, &updated_lamp);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Lamp updated successfully.");
-        refresh_mqtt_subscriptions();
-        publish_ha_discovery_messages();
-    } else {
-        ESP_LOGE(TAG, "Failed to update lamp: %s", esp_err_to_name(err));
-    }
-
-    // Redirect back to the main page
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-
-/* An HTTP GET handler for the main lamp overview page */
-static esp_err_t get_lamps_overview_handler(httpd_req_t *req)
-{
-    httpd_resp_sendstr_chunk(req,
-        "<html><head><title>BLE Mesh Gateway</title>"
-        "<style>"
-        "body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }"
-        "h1, h2 { color: #333; }"
-        "table { width: 100%; border-collapse: collapse; margin-top: 20px; }"
-        "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }"
-        "th { background-color: #4CAF50; color: white; }"
-        "tr:nth-child(even) { background-color: #f2f2f2; }"
-        "form { display: inline-block; margin: 0; }"
-        "input[type=submit] { background-color: #4CAF50; color: white; padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; }"
-        "input[type=submit].remove { background-color: #f44336; }"
-        "input[type=text] { padding: 5px; border-radius: 4px; border: 1px solid #ccc; }"
-        ".container { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }"
-        "</style></head><body><div class='container'>"
-        "<h1>Lamp Overview</h1><table>"
-        "<tr><th>Name</th><th>Address</th><th>Type</th><th>Scale</th><th>Actions</th></tr>");
-
-    int lamp_count;
-    const LampInfo* lamps = get_all_lamps(&lamp_count);
-
-    for (int i = 0; i < lamp_count; i++) {
-        char row_buf[512];
-        snprintf(row_buf, sizeof(row_buf),
-            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>"
-            "<form action='/remove_lamp' method='post'>"
-            "<input type='hidden' name='lamp_name' value='%s'>"
-            "<input type='submit' value='Remove' class='remove'>"
-            "</form> "
-            "<form action='/edit_lamp' method='get'>"
-            "<input type='hidden' name='lamp_name' value='%s'>"
-            "<input type='submit' value='Edit'>"
-            "</form>"
-            "</td></tr>",
-            lamps[i].name, lamps[i].address,
-            lamps[i].supports_color ? "Color (HS)" : "White", 
-            lamps[i].brightness_scaling,
-            lamps[i].name, lamps[i].name);
-        httpd_resp_sendstr_chunk(req, row_buf);
-    }
-
-    httpd_resp_sendstr_chunk(req, "</table>");
-
-    httpd_resp_sendstr_chunk(req,
-        "<h2>Add New Lamp</h2>"
-        "<form action='/add_lamp' method='post'>"
-        "<label for='lamp_name'>Name: </label>"
-        "<input type='text' id='lamp_name' name='lamp_name' required> "
-        "<label for='lamp_address'>Address: </label>"
-        "<input type='text' id='lamp_address' name='lamp_address' placeholder='e.g., 0x0019' required> "
-        "<label for='lamp_color'>Supports Color: </label>"
-        "<input type='checkbox' id='lamp_color' name='lamp_color' value='1'><br><br>"
-        "<label for='lamp_scaling'>Brightness Scale (e.g., 100): </label>"
-        "<input type='number' id='lamp_scaling' name='lamp_scaling' value='100' required><br><br>"
-        "<input type='submit' value='Add Lamp'>"
-        "</form>"
-        "<h2>System</h2>"
-        "<form action='/restart' method='post'><input type='submit' value='Restart Device'></form>"
-        "</div></body></html>");
-
-    // Final chunk to end the response
-    httpd_resp_send_chunk(req, NULL, 0);
-    return ESP_OK;
-}
-
-/* An HTTP GET handler to serve the edit lamp page */
-static esp_err_t edit_lamp_get_handler(httpd_req_t *req)
-{
-    char query_buf[128];
-    char lamp_name[MAX_LAMP_NAME_LEN];
-    LampInfo lamp_to_edit;
-
-    if (httpd_req_get_url_query_str(req, query_buf, sizeof(query_buf)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing query string");
-        return ESP_FAIL;
-    }
-    if (httpd_query_key_value(query_buf, "lamp_name", lamp_name, sizeof(lamp_name)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing lamp_name parameter");
-        return ESP_FAIL;
-    }
-
-    if (find_lamp_by_name(lamp_name, &lamp_to_edit) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Lamp not found");
-        return ESP_FAIL;
-    }
-
-    // Send the response in chunks to avoid large stack buffers and compiler warnings
-    httpd_resp_sendstr_chunk(req,
-        "<html><head><title>Edit Lamp</title>"
-        "<style>"
-        "body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }"
-        "h1 { color: #333; }"
-        ".container { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }"
-        "input[type=text], input[type=submit] { padding: 8px; margin-top: 5px; border-radius: 4px; border: 1px solid #ccc; }"
-        "input[type=submit] { background-color: #4CAF50; color: white; cursor: pointer; }"
-        "</style></head><body><div class='container'>");
-
-    char chunk_buf[1024]; // A reasonably sized buffer for dynamic parts
+    EventBits_t bits = xEventGroupWaitBits(s_mqtt_test_group, MQTT_TEST_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(5000));
     
-    // Send header with lamp name
-    snprintf(chunk_buf, sizeof(chunk_buf), "<h1>Edit Lamp: %s</h1>", lamp_to_edit.name);
-    httpd_resp_sendstr_chunk(req, chunk_buf);
+    esp_mqtt_client_stop(client);
+    esp_mqtt_client_destroy(client);
+    vEventGroupDelete(s_mqtt_test_group);
 
-    // Send form part 1
-    snprintf(chunk_buf, sizeof(chunk_buf),
-             "<form action='/update_lamp' method='post'>"
-             "<input type='hidden' name='original_name' value='%s'>"
-             "<label for='lamp_name'>New Name:</label><br>"
-             "<input type='text' id='lamp_name' name='lamp_name' value='%s' required><br><br>",
-             lamp_to_edit.name, lamp_to_edit.name);
-    httpd_resp_sendstr_chunk(req, chunk_buf);
+    return (bits & MQTT_TEST_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
+}
 
-    // Send form part 2
-    snprintf(chunk_buf, sizeof(chunk_buf),
-             "<label for='lamp_address'>New Address:</label><br>"
-             "<input type='text' id='lamp_address' name='lamp_address' value='%s' required><br><br>"
-             "<label for='lamp_color'>Supports Color: </label>"
-             "<input type='checkbox' id='lamp_color' name='lamp_color' value='1' %s><br><br>"
-             "<label for='lamp_scaling'>Brightness Scale:</label><br>"
-             "<input type='number' id='lamp_scaling' name='lamp_scaling' value='%d' required><br><br>"
-             "<input type='submit' value='Update Lamp'>"
-             "</form><br><a href='/'>Back to Overview</a>"
-             "</div></body></html>",
-             lamp_to_edit.address,
-             lamp_to_edit.supports_color ? "checked" : "",
-             lamp_to_edit.brightness_scaling);
-    httpd_resp_sendstr_chunk(req, chunk_buf);
+// --- Handlers ---
 
-    // Send final chunk to close connection
-    httpd_resp_send_chunk(req, NULL, 0);
+// CONFIG PAGE
+static esp_err_t get_config_handler(httpd_req_t *req) {
+    char url[128] = {0}, user[64] = {0}, pass[64] = {0};
+    nvs_handle_t h;
+    if (nvs_open("mqtt_config", NVS_READONLY, &h) == ESP_OK) {
+        size_t len = sizeof(url); nvs_get_str(h, "broker_url", url, &len);
+        len = sizeof(user); nvs_get_str(h, "username", user, &len);
+        len = sizeof(pass); nvs_get_str(h, "password", pass, &len);
+        nvs_close(h);
+    }
 
+    // Use a single large buffer to prevent "empty chunk" errors
+    char page_buf[2048]; 
+    
+    snprintf(page_buf, sizeof(page_buf),
+        "<html><head><title>Configuration</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+        "<style>body{font-family:sans-serif;padding:20px;max-width:600px;margin:0 auto;}"
+        "input{width:100%%;padding:8px;margin-bottom:10px;box-sizing:border-box;}"
+        ".btn{padding:10px;width:100%%;cursor:pointer;margin-bottom:10px;}"
+        ".save{background:#4CAF50;color:white;border:none;}"
+        ".test{background:#2196F3;color:white;border:none;}"
+        "</style>"
+        "<script>"
+        "function test() {"
+        "  var b = document.getElementById('testBtn'); b.innerText='Testing...'; b.disabled=true;"
+        "  var data = new URLSearchParams(new FormData(document.getElementById('cfg')));"
+        "  fetch('/test_mqtt', { method: 'POST', body: data }).then(r=>r.text()).then(t=>{"
+        "    alert(t); b.innerText='Test Connection'; b.disabled=false;"
+        "  });"
+        "}"
+        "</script>"
+        "</head><body><h1>System Configuration</h1>"
+        "<form id='cfg' action='/save_config' method='post'>"
+        "<h3>MQTT Settings</h3>"
+        "<label>Broker URL:</label><input type='text' name='url' value='%s' placeholder='mqtt://192.168.1.10:1883' required>"
+        "<label>Username:</label><input type='text' name='user' value='%s'>"
+        "<label>Password:</label><input type='password' name='pass' value='%s'>"
+        "<button type='button' id='testBtn' class='btn test' onclick='test()'>Test Connection</button>"
+        "<input type='submit' value='Save & Restart' class='btn save'>"
+        "</form><a href='/'>Back to Overview</a></body></html>",
+        url, user, pass
+    );
+
+    httpd_resp_send(req, page_buf, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
-/* An HTTP POST handler to restart the device */
-static esp_err_t restart_post_handler(httpd_req_t *req)
-{
-    ESP_LOGI(TAG, "Restarting device via HTTP request.");
-    httpd_resp_sendstr(req, "Restarting...");
+// TEST MQTT POST
+static esp_err_t test_mqtt_post_handler(httpd_req_t *req) {
+    char buf[512];
+    int ret = httpd_req_recv(req, buf, sizeof(buf));
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+    char url[128]={0}, user[64]={0}, pass[64]={0};
+    get_post_field(buf, "url=", url, sizeof(url));
+    get_post_field(buf, "user=", user, sizeof(user));
+    get_post_field(buf, "pass=", pass, sizeof(pass));
+
+    if (perform_mqtt_test(url, user, pass) == ESP_OK) httpd_resp_sendstr(req, "Connection Successful!");
+    else httpd_resp_sendstr(req, "Connection Failed!");
+    return ESP_OK;
+}
+
+// SAVE CONFIG POST
+static esp_err_t save_config_post_handler(httpd_req_t *req) {
+    char buf[512];
+    int ret = httpd_req_recv(req, buf, sizeof(buf));
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+    char url[128]={0}, user[64]={0}, pass[64]={0};
+    get_post_field(buf, "url=", url, sizeof(url));
+    get_post_field(buf, "user=", user, sizeof(user));
+    get_post_field(buf, "pass=", pass, sizeof(pass));
+
+    nvs_handle_t h;
+    if (nvs_open("mqtt_config", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, "broker_url", url);
+        nvs_set_str(h, "username", user);
+        nvs_set_str(h, "password", pass);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    httpd_resp_sendstr(req, "Saved. Restarting...");
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
     return ESP_OK;
 }
 
+// --- Lamp Handlers ---
+static esp_err_t get_lamps_overview_handler(httpd_req_t *req) {
+    httpd_resp_sendstr_chunk(req,
+        "<html><head><title>Gateway</title>"
+        "<style>body{font-family:sans-serif;padding:20px;max-width:800px;margin:0 auto;}"
+        "table{width:100%;border-collapse:collapse;margin-top:20px;}"
+        "th,td{border:1px solid #ddd;padding:8px;text-align:left;}"
+        "th{background:#4CAF50;color:white;}"
+        ".btn{padding:5px 10px;text-decoration:none;border-radius:4px;color:white;display:inline-block;}"
+        ".del{background:#f44336;} .edit{background:#2196F3;} .cfg{background:#FF9800;margin-bottom:10px;}"
+        "</style></head><body>"
+        "<h1>Lamp Overview</h1>"
+        "<a href='/config' class='btn cfg'>System Configuration</a>"
+        "<table><tr><th>Name</th><th>Address</th><th>Type</th><th>Scale</th><th>Actions</th></tr>");
+
+    int count;
+    const LampInfo* lamps = get_all_lamps(&count);
+    for (int i = 0; i < count; i++) {
+        char row[512];
+        snprintf(row, sizeof(row), "<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>"
+            "<form action='/remove_lamp' method='post' style='display:inline;'><input type='hidden' name='lamp_name' value='%s'><input type='submit' value='Remove' class='btn del'></form> "
+            "<form action='/edit_lamp' method='get' style='display:inline;'><input type='hidden' name='lamp_name' value='%s'><input type='submit' value='Edit' class='btn edit'></form>"
+            "</td></tr>",
+            lamps[i].name, lamps[i].address, lamps[i].supports_color?"Color":"White", lamps[i].brightness_scaling, lamps[i].name, lamps[i].name);
+        httpd_resp_sendstr_chunk(req, row);
+    }
+    httpd_resp_sendstr_chunk(req, "</table><h2>Add Lamp</h2>"
+        "<form action='/add_lamp' method='post'>"
+        "Name: <input type='text' name='lamp_name' required> "
+        "Addr: <input type='text' name='lamp_address' required> "
+        "Scale: <input type='number' name='lamp_scaling' value='100' style='width:60px'> "
+        "Color: <input type='checkbox' name='lamp_color' value='1'> "
+        "<input type='submit' value='Add' class='btn edit'></form></body></html>");
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t add_lamp_post_handler(httpd_req_t *req) {
+    char buf[512]; httpd_req_recv(req, buf, sizeof(buf));
+    LampInfo l = {0}; char col[4]={0}, scl[16]={0};
+    get_post_field(buf, "lamp_name=", l.name, sizeof(l.name));
+    get_post_field(buf, "lamp_address=", l.address, sizeof(l.address));
+    get_post_field(buf, "lamp_color=", col, sizeof(col)); l.supports_color = (col[0]=='1');
+    get_post_field(buf, "lamp_scaling=", scl, sizeof(scl)); l.brightness_scaling = atoi(scl)?atoi(scl):100;
+    add_lamp_info(&l);
+    httpd_resp_set_status(req, "303 See Other"); httpd_resp_set_hdr(req, "Location", "/"); httpd_resp_send(req,NULL,0);
+    refresh_mqtt_subscriptions(); publish_ha_discovery_messages();
+    return ESP_OK;
+}
+static esp_err_t remove_lamp_post_handler(httpd_req_t *req) {
+    char buf[128]; httpd_req_recv(req, buf, sizeof(buf));
+    char name[32]; get_post_field(buf, "lamp_name=", name, sizeof(name));
+    remove_lamp_info_by_name(name);
+    httpd_resp_set_status(req, "303 See Other"); httpd_resp_set_hdr(req, "Location", "/"); httpd_resp_send(req,NULL,0);
+    refresh_mqtt_subscriptions(); publish_ha_discovery_messages();
+    return ESP_OK;
+}
+static esp_err_t edit_lamp_get_handler(httpd_req_t *req) {
+    char q[128], name[32]; httpd_req_get_url_query_str(req, q, sizeof(q)); httpd_query_key_value(q, "lamp_name", name, sizeof(name));
+    LampInfo l; find_lamp_by_name(name, &l);
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "<html><body><h1>Edit %s</h1><form action='/update_lamp' method='post'>"
+        "<input type='hidden' name='original_name' value='%s'>"
+        "Name: <input type='text' name='lamp_name' value='%s'><br>"
+        "Addr: <input type='text' name='lamp_address' value='%s'><br>"
+        "Scale: <input type='number' name='lamp_scaling' value='%d'><br>"
+        "Color: <input type='checkbox' name='lamp_color' value='1' %s><br>"
+        "<input type='submit' value='Update'></form></body></html>",
+        l.name, l.name, l.name, l.address, l.brightness_scaling, l.supports_color?"checked":"");
+    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+static esp_err_t update_lamp_post_handler(httpd_req_t *req) {
+    char buf[512]; httpd_req_recv(req, buf, sizeof(buf));
+    char orig[32]; LampInfo l={0}; char col[4]={0}, scl[16]={0};
+    get_post_field(buf, "original_name=", orig, sizeof(orig));
+    get_post_field(buf, "lamp_name=", l.name, sizeof(l.name));
+    get_post_field(buf, "lamp_address=", l.address, sizeof(l.address));
+    get_post_field(buf, "lamp_color=", col, sizeof(col)); l.supports_color = (col[0]=='1');
+    get_post_field(buf, "lamp_scaling=", scl, sizeof(scl)); l.brightness_scaling = atoi(scl)?atoi(scl):100;
+    update_lamp_info(orig, &l);
+    httpd_resp_set_status(req, "303 See Other"); httpd_resp_set_hdr(req, "Location", "/"); httpd_resp_send(req,NULL,0);
+    refresh_mqtt_subscriptions(); publish_ha_discovery_messages();
+    return ESP_OK;
+}
+
 httpd_handle_t start_webserver(void)
 {
-    httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.uri_match_fn = httpd_uri_match_wildcard; // Allow wildcard matching
+    config.stack_size = 8192;
+    httpd_handle_t server = NULL;
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = get_lamps_overview_handler };
+        httpd_register_uri_handler(server, &root);
+        httpd_uri_t add = { .uri = "/add_lamp", .method = HTTP_POST, .handler = add_lamp_post_handler };
+        httpd_register_uri_handler(server, &add);
+        httpd_uri_t rem = { .uri = "/remove_lamp", .method = HTTP_POST, .handler = remove_lamp_post_handler };
+        httpd_register_uri_handler(server, &rem);
+        httpd_uri_t edit = { .uri = "/edit_lamp", .method = HTTP_GET, .handler = edit_lamp_get_handler };
+        httpd_register_uri_handler(server, &edit);
+        httpd_uri_t upd = { .uri = "/update_lamp", .method = HTTP_POST, .handler = update_lamp_post_handler };
+        httpd_register_uri_handler(server, &upd);
 
-    ESP_LOGI(TAG, "Starting httpd server");
-    if (httpd_start(&server, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start httpd server");
-        return NULL;
+        // NEW CONFIG ROUTES
+        httpd_uri_t cfg = { .uri = "/config", .method = HTTP_GET, .handler = get_config_handler };
+        httpd_register_uri_handler(server, &cfg);
+        httpd_uri_t test = { .uri = "/test_mqtt", .method = HTTP_POST, .handler = test_mqtt_post_handler };
+        httpd_register_uri_handler(server, &test);
+        httpd_uri_t save = { .uri = "/save_config", .method = HTTP_POST, .handler = save_config_post_handler };
+        httpd_register_uri_handler(server, &save);
     }
-
-    // URI Handlers
-    const httpd_uri_t root = {
-        .uri       = "/",
-        .method    = HTTP_GET,
-        .handler   = get_lamps_overview_handler,
-    };
-    httpd_register_uri_handler(server, &root);
-
-    const httpd_uri_t add_lamp = {
-        .uri       = "/add_lamp",
-        .method    = HTTP_POST,
-        .handler   = add_lamp_post_handler,
-    };
-    httpd_register_uri_handler(server, &add_lamp);
-
-    const httpd_uri_t remove_lamp = {
-        .uri       = "/remove_lamp",
-        .method    = HTTP_POST,
-        .handler   = remove_lamp_post_handler,
-    };
-    httpd_register_uri_handler(server, &remove_lamp);
-    
-    const httpd_uri_t edit_lamp = {
-        .uri       = "/edit_lamp",
-        .method    = HTTP_GET,
-        .handler   = edit_lamp_get_handler,
-    };
-    httpd_register_uri_handler(server, &edit_lamp);
-
-    const httpd_uri_t update_lamp = {
-        .uri       = "/update_lamp",
-        .method    = HTTP_POST,
-        .handler   = update_lamp_post_handler,
-    };
-    httpd_register_uri_handler(server, &update_lamp);
-
-    const httpd_uri_t restart = {
-        .uri       = "/restart",
-        .method    = HTTP_POST,
-        .handler   = restart_post_handler,
-    };
-    httpd_register_uri_handler(server, &restart);
-
     return server;
 }
