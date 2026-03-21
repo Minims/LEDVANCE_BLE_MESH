@@ -6,7 +6,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/Ultraworg/LEDVANCE_BLE_MESH
-      ref: espHome
+      ref: main
     components: [ble_mesh_gateway]
     refresh: 0s
 
