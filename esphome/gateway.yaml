@@ -47,13 +47,53 @@ logger:
 # Enable Home Assistant API
 api:
   password: ""
+  services:
+    # Brightness-only service for monochromatic lamps.
+    # address: mesh unicast address (decimal)
+    # brightness: 0-100
+    # max_level: device-specific lightness ceiling, typically 50
+    - service: set_mesh_light
+      variables:
+        address: int
+        brightness: int
+        max_level: int
+      then:
+        - lambda: |-
+            static std::map<uint16_t, uint32_t> last_sends;
+            float bright_f = brightness / 100.0f;
+            id(mesh_gateway).control_light(address, bright_f, last_sends[address], max_level);
 
-# OTA Updates
+    # HSL service for color lamps.
+    # brightness: 0-100, hue: 0-360, saturation: 0-100
+    - service: set_mesh_light_hsl
+      variables:
+        address: int
+        brightness: int
+        hue: int
+        saturation: int
+        max_level: int
+      then:
+        - lambda: |-
+            static std::map<uint16_t, uint32_t> last_sends;
+            float bright_f = brightness / 100.0f;
+            float hue_f = (float)hue;
+            float sat_f = saturation / 100.0f;
+            id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
+
+    # Diagnostic service to query the remote lightness and CTL temperature ranges.
+    - service: get_mesh_ranges
+      variables:
+        address: int
+      then:
+        - lambda: |-
+            id(mesh_gateway).request_ranges(address);
+
+# OTA updates
 ota:
   - platform: esphome
     password: ""
 
-# WiFi Configuration
+# Wi-Fi configuration
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password

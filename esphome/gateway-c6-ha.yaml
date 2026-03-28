@@ -53,8 +53,10 @@ api:
   encryption:
     key: !secret api_key
   services:
-    # Service for brightness-only lamps (monochromatic)
-    # address: mesh unicast address (decimal), brightness: 0-100, max_level: typically 50
+    # Brightness-only service for monochromatic lamps.
+    # address: mesh unicast address (decimal)
+    # brightness: 0-100
+    # max_level: device-specific lightness ceiling, typically 50
     - service: set_mesh_light
       variables:
         address: int
@@ -66,7 +68,7 @@ api:
             float bright_f = brightness / 100.0f;
             id(mesh_gateway).control_light(address, bright_f, last_sends[address], max_level);
 
-    # Service for HSL color lamps
+    # HSL service for color lamps.
     # brightness: 0-100, hue: 0-360, saturation: 0-100
     - service: set_mesh_light_hsl
       variables:
@@ -83,12 +85,20 @@ api:
             float sat_f = saturation / 100.0f;
             id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
 
-# OTA Updates
+    # Diagnostic service to query the remote lightness and CTL temperature ranges.
+    - service: get_mesh_ranges
+      variables:
+        address: int
+      then:
+        - lambda: |-
+            id(mesh_gateway).request_ranges(address);
+
+# OTA updates
 ota:
   - platform: esphome
     password: "22bfa31afb3531fc6e1374f6e5696e91"
 
-# WiFi Configuration
+# Wi-Fi configuration
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
