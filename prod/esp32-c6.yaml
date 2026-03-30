@@ -71,6 +71,17 @@ api:
             float sat_f = saturation / 100.0f;
             id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
 
+    # Service for raw OnOff command
+    # address: mesh unicast address (decimal), state: 0=OFF 1=ON, use_ack: 0=UNACK 1=ACK
+    - service: set_mesh_onoff
+      variables:
+        address: int
+        state: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_onoff((uint16_t)address, state != 0, use_ack != 0);
+
 # OTA
 ota:
   - platform: esphome
@@ -118,7 +129,7 @@ output:
     write_action:
       - lambda: |
           static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0004, state, last, 50);
+          id(mesh_gateway).control_light(0x0004, state, last, 50, true);
 
   - platform: template
     id: mesh_output_0005
