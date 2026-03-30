@@ -20,6 +20,14 @@ void ble_mesh_bridge_send_generic_level(uint16_t addr, int16_t level);
 void ble_mesh_bridge_send_hsl(uint16_t addr, uint16_t lightness, uint16_t hue,
                               uint16_t saturation, bool use_ack);
 
+// Range queries
+void ble_mesh_bridge_send_lightness_range_get(uint16_t addr);
+
+// Callback for range status responses
+typedef void (*ble_mesh_lightness_range_cb_t)(uint16_t addr, uint16_t range_min,
+                                              uint16_t range_max);
+void ble_mesh_bridge_set_lightness_range_callback(ble_mesh_lightness_range_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif

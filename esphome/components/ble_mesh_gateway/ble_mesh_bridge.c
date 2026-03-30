@@ -143,6 +143,8 @@ static void config_server_callback(esp_ble_mesh_cfg_server_cb_event_t event,
   }
 }
 
+static ble_mesh_lightness_range_cb_t s_lightness_range_cb = NULL;
+
 static void
 generic_client_callback(esp_ble_mesh_generic_client_cb_event_t event,
                         esp_ble_mesh_generic_client_cb_param_t *param) {
@@ -192,6 +194,23 @@ static void light_client_callback(esp_ble_mesh_light_client_cb_event_t event,
       }
     } else {
       LOG_E(TAG, "Light client SET failed: addr=0x%04X, opcode=0x%04X, err=%d",
+            addr, (unsigned)opcode, param->error_code);
+    }
+    break;
+  case ESP_BLE_MESH_LIGHT_CLIENT_GET_STATE_EVT:
+    if (param->error_code == ESP_OK) {
+      if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_STATUS) {
+        uint16_t range_min = param->status_cb.lightness_range_status.range_min;
+        uint16_t range_max = param->status_cb.lightness_range_status.range_max;
+        uint8_t status_code = param->status_cb.lightness_range_status.status_code;
+        LOG_I(TAG, "Lightness Range from 0x%04X: status=%d, min=%d, max=%d",
+              addr, status_code, range_min, range_max);
+        if (s_lightness_range_cb) {
+          s_lightness_range_cb(addr, range_min, range_max);
+        }
+      }
+    } else {
+      LOG_E(TAG, "Light client GET failed: addr=0x%04X, opcode=0x%04X, err=%d",
             addr, (unsigned)opcode, param->error_code);
     }
     break;
@@ -346,4 +365,31 @@ void ble_mesh_bridge_send_hsl(uint16_t addr, uint16_t lightness, uint16_t hue,
   set.hsl_set.tid = s_app_state.tid++;
 
   esp_ble_mesh_light_client_set_state(&common, &set);
+}
+
+void ble_mesh_bridge_send_lightness_range_get(uint16_t addr) {
+  if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+    return;
+
+  esp_ble_mesh_light_client_get_state_t get = {0};
+  esp_ble_mesh_client_common_param_t common = {0};
+
+  common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_RANGE_GET;
+  common.model = light_client.model;
+  common.ctx.net_idx = s_app_state.net_idx;
+  common.ctx.app_idx = s_app_state.app_idx;
+  common.ctx.addr = addr;
+  common.ctx.send_ttl = 7;
+  common.msg_timeout = 2000;
+
+  LOG_I(TAG, "Send Lightness Range GET to 0x%04X", addr);
+
+  esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get);
+  if (err) {
+    LOG_E(TAG, "Send Lightness Range GET failed: %d", err);
+  }
+}
+
+void ble_mesh_bridge_set_lightness_range_callback(ble_mesh_lightness_range_cb_t cb) {
+  s_lightness_range_cb = cb;
 }
