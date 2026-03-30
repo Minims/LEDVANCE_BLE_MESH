@@ -91,6 +91,17 @@ api:
         - lambda: |-
             ble_mesh_bridge_send_lightness_range_get((uint16_t)address);
 
+    # Raw lightness SET command for testing lightness range
+    # address: unicast addr, level: raw lightness value (0-65535), use_ack: 0=NO ACK, 1=ACK
+    - service: set_mesh_lightness
+      variables:
+        address: int
+        level: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_level((uint16_t)address, (uint16_t)level, use_ack != 0);
+
 # OTA
 ota:
   - platform: esphome
@@ -138,7 +149,7 @@ output:
     write_action:
       - lambda: |
           static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0004, state, last, 50, true);
+          id(mesh_gateway).control_light(0x0004, state, last, 65535, true);
 
   - platform: template
     id: mesh_output_0005
@@ -146,7 +157,7 @@ output:
     write_action:
       - lambda: |
           static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0005, state, last, 50);
+          id(mesh_gateway).control_light(0x0005, state, last, 65535);
 
 # LIGHT
 light:
