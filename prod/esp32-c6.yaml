@@ -82,6 +82,15 @@ api:
         - lambda: |-
             ble_mesh_bridge_send_onoff((uint16_t)address, state != 0, use_ack != 0);
 
+    # Query lightness range (min/max) from a lamp
+    # Response logged via callback: "Lightness Range from 0xADDR: min=X, max=Y"
+    - service: get_lightness_range
+      variables:
+        address: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_lightness_range_get((uint16_t)address);
+
 # OTA
 ota:
   - platform: esphome
