@@ -53,8 +53,9 @@ api:
   encryption:
     key: !secret api_key
   services:
-    # Service for brightness-only lamps (monochromatic)
-    # address: mesh unicast address (decimal), brightness: 0-100, max_level: typically 50
+    # Control brightness (monochromatic lamp)
+    # address: unicast address (decimal), brightness: 0-100, max_level: e.g. 50
+    # Add use_ack=true as 5th argument for ACK-only lamps
     - service: set_mesh_light
       variables:
         address: int
@@ -66,7 +67,7 @@ api:
             float bright_f = brightness / 100.0f;
             id(mesh_gateway).control_light(address, bright_f, last_sends[address], max_level);
 
-    # Service for HSL color lamps
+    # Control HSL color lamp
     # brightness: 0-100, hue: 0-360, saturation: 0-100
     - service: set_mesh_light_hsl
       variables:
@@ -82,6 +83,17 @@ api:
             float hue_f = (float)hue;
             float sat_f = saturation / 100.0f;
             id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
+
+    # Raw OnOff command (useful for ACK-only lamps)
+    # state: 0=OFF, 1=ON | use_ack: 0=NO ACK (default), 1=ACK
+    - service: set_mesh_onoff
+      variables:
+        address: int
+        state: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_onoff((uint16_t)address, state != 0, use_ack != 0);
 
 # OTA Updates
 ota:

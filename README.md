@@ -2,7 +2,7 @@
 
 Control **LEDVANCE Bluetooth Mesh bulbs** from [Home Assistant](https://home-assistant.io) using an ESP32 as a gateway.
 
-Supports: **On/Off**, **Brightness**, **HSL Color**.
+Supports: **On/Off**, **Brightness**, **HSL Color**. ACK and NO ACK modes configurable per lamp.
 
 ---
 
@@ -94,37 +94,57 @@ Add services to your ESPHome config once:
 ```yaml
 api:
   services:
+    # Control brightness (monochromatic lamp)
+    # address: unicast address (decimal), brightness: 0-100, max_level: e.g. 50
+    # use_ack: optional, pass true as 5th arg for ACK-only lamps
     - service: set_mesh_light
       variables:
         address: int
-        brightness: float
+        brightness: int
         max_level: int
       then:
         - lambda: |-
             static std::map<uint16_t, uint32_t> last_sends;
-            id(mesh_gateway).control_light(address, brightness, last_sends[address], max_level);
+            float bright_f = brightness / 100.0f;
+            id(mesh_gateway).control_light(address, bright_f, last_sends[address], max_level);
 
+    # Control HSL color lamp
     - service: set_mesh_light_hsl
       variables:
         address: int
-        brightness: float
-        hue: float
-        saturation: float
+        brightness: int
+        hue: int
+        saturation: int
         max_level: int
       then:
         - lambda: |-
             static std::map<uint16_t, uint32_t> last_sends;
-            id(mesh_gateway).control_light_hsl(address, brightness, hue, saturation, last_sends[address], max_level);
+            float bright_f = brightness / 100.0f;
+            float hue_f = (float)hue;
+            float sat_f = saturation / 100.0f;
+            id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
+
+    # Raw OnOff command (useful for ACK-only lamps)
+    # state: 0=OFF, 1=ON | use_ack: 0=NO ACK (default), 1=ACK
+    - service: set_mesh_onoff
+      variables:
+        address: int
+        state: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_onoff((uint16_t)address, state != 0, use_ack != 0);
 ```
 
 Then define lamps in Home Assistant's `configuration.yaml` - see [`esphome/homeassistant_example.yaml`](esphome/homeassistant_example.yaml).
 
-**Parameters:**
-- `address` - Lamp's unicast address (decimal, e.g., 32 = 0x0020)
-- `brightness` - 0.0-1.0
-- `hue` - 0-360 (for HSL)
-- `saturation` - 0.0-1.0 (for HSL)
-- `max_level` - 50 for LEDVANCE, 255 for standard
+**Parameters for `control_light` / `control_light_hsl`:**
+- `address` — Lamp's unicast address (decimal, e.g., 20 = 0x0014)
+- `brightness` — 0-100 (percent), converted to 0.0-1.0 internally
+- `hue` — 0-360 (for HSL)
+- `saturation` — 0-100 (for HSL)
+- `max_level` — Max lightness value sent to lamp. Start with `50` for LEDVANCE, adjust based on observed range
+- `use_ack` *(optional, default false)* — Set `true` for ACK-only lamps (e.g., some LEDVANCE bulbs that ignore UNACK)
 
 ### HSL Color Control
 
