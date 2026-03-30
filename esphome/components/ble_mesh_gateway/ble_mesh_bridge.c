@@ -146,12 +146,62 @@ static void config_server_callback(esp_ble_mesh_cfg_server_cb_event_t event,
 static void
 generic_client_callback(esp_ble_mesh_generic_client_cb_event_t event,
                         esp_ble_mesh_generic_client_cb_param_t *param) {
-  // Log function placeholder
+  uint16_t addr = param->params->ctx.addr;
+  uint32_t opcode = param->params->opcode;
+
+  switch (event) {
+  case ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT:
+    if (param->error_code == ESP_OK) {
+      if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_STATUS) {
+        LOG_I(TAG, "OnOff ACK from 0x%04X: state=%d",
+              addr, param->status_cb.onoff_status.present_onoff);
+      }
+    } else {
+      LOG_E(TAG, "Generic client SET failed: addr=0x%04X, opcode=0x%04X, err=%d",
+            addr, (unsigned)opcode, param->error_code);
+    }
+    break;
+  case ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT:
+    LOG_W(TAG, "Generic client TIMEOUT: addr=0x%04X, opcode=0x%04X",
+          addr, (unsigned)opcode);
+    break;
+  default:
+    break;
+  }
 }
 
 static void light_client_callback(esp_ble_mesh_light_client_cb_event_t event,
                                   esp_ble_mesh_light_client_cb_param_t *param) {
-  // Log function placeholder
+  uint16_t addr = param->params->ctx.addr;
+  uint32_t opcode = param->params->opcode;
+
+  switch (event) {
+  case ESP_BLE_MESH_LIGHT_CLIENT_SET_STATE_EVT:
+    if (param->error_code == ESP_OK) {
+      if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_STATUS) {
+        LOG_I(TAG, "Lightness ACK from 0x%04X: present=%d, target=%d",
+              addr,
+              param->status_cb.lightness_status.present_lightness,
+              param->status_cb.lightness_status.target_lightness);
+      } else if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_STATUS) {
+        LOG_I(TAG, "HSL ACK from 0x%04X: L=%d, H=%d, S=%d",
+              addr,
+              param->status_cb.hsl_status.hsl_lightness,
+              param->status_cb.hsl_status.hsl_hue,
+              param->status_cb.hsl_status.hsl_saturation);
+      }
+    } else {
+      LOG_E(TAG, "Light client SET failed: addr=0x%04X, opcode=0x%04X, err=%d",
+            addr, (unsigned)opcode, param->error_code);
+    }
+    break;
+  case ESP_BLE_MESH_LIGHT_CLIENT_TIMEOUT_EVT:
+    LOG_W(TAG, "Light client TIMEOUT: addr=0x%04X, opcode=0x%04X",
+          addr, (unsigned)opcode);
+    break;
+  default:
+    break;
+  }
 }
 
 // --- Public Accessors ---
@@ -215,7 +265,7 @@ void ble_mesh_bridge_init(void) {
   LOG_I(TAG, "BLE Mesh Node initialized (Bridge)");
 }
 
-void ble_mesh_bridge_send_onoff(uint16_t addr, bool state) {
+void ble_mesh_bridge_send_onoff(uint16_t addr, bool state, bool use_ack) {
   if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED) {
     LOG_W(TAG, "AppKey not bound, cannot send OnOff.");
     return;
@@ -224,17 +274,21 @@ void ble_mesh_bridge_send_onoff(uint16_t addr, bool state) {
   esp_ble_mesh_generic_client_set_state_t set = {0};
   esp_ble_mesh_client_common_param_t common = {0};
 
-  common.opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK;
+  common.opcode = use_ack ? ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET
+                          : ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK;
   common.model = onoff_client.model;
   common.ctx.net_idx = s_app_state.net_idx;
   common.ctx.app_idx = s_app_state.app_idx;
   common.ctx.addr = addr;
   common.ctx.send_ttl = 7;
-  common.msg_timeout = 0;
+  common.msg_timeout = use_ack ? 1000 : 0;
 
   set.onoff_set.op_en = false;
   set.onoff_set.onoff = state ? 1 : 0;
   set.onoff_set.tid = s_app_state.tid++;
+
+  LOG_I(TAG, "Send OnOff %s to 0x%04X (%s)",
+        state ? "ON" : "OFF", addr, use_ack ? "ACK" : "UNACK");
 
   esp_err_t err = esp_ble_mesh_generic_client_set_state(&common, &set);
   if (err) {
@@ -242,41 +296,48 @@ void ble_mesh_bridge_send_onoff(uint16_t addr, bool state) {
   }
 }
 
-void ble_mesh_bridge_send_level(uint16_t addr, uint16_t level) {
+void ble_mesh_bridge_send_level(uint16_t addr, uint16_t level, bool use_ack) {
   if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
     return;
 
   esp_ble_mesh_light_client_set_state_t set = {0};
   esp_ble_mesh_client_common_param_t common = {0};
 
-  common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK;
+  common.opcode = use_ack ? ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET
+                          : ESP_BLE_MESH_MODEL_OP_LIGHT_LIGHTNESS_SET_UNACK;
   common.model = light_client.model;
   common.ctx.net_idx = s_app_state.net_idx;
   common.ctx.app_idx = s_app_state.app_idx;
   common.ctx.addr = addr;
   common.ctx.send_ttl = 7;
+  common.msg_timeout = use_ack ? 1000 : 0;
 
   set.lightness_set.op_en = false;
   set.lightness_set.lightness = level;
   set.lightness_set.tid = s_app_state.tid++;
 
+  LOG_I(TAG, "Send Lightness %d to 0x%04X (%s)",
+        level, addr, use_ack ? "ACK" : "UNACK");
+
   esp_ble_mesh_light_client_set_state(&common, &set);
 }
 
 void ble_mesh_bridge_send_hsl(uint16_t addr, uint16_t lightness, uint16_t hue,
-                              uint16_t saturation) {
+                              uint16_t saturation, bool use_ack) {
   if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
     return;
 
   esp_ble_mesh_light_client_set_state_t set = {0};
   esp_ble_mesh_client_common_param_t common = {0};
 
-  common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET_UNACK;
+  common.opcode = use_ack ? ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET
+                          : ESP_BLE_MESH_MODEL_OP_LIGHT_HSL_SET_UNACK;
   common.model = hsl_client.model;
   common.ctx.net_idx = s_app_state.net_idx;
   common.ctx.app_idx = s_app_state.app_idx;
   common.ctx.addr = addr;
   common.ctx.send_ttl = 7;
+  common.msg_timeout = use_ack ? 1000 : 0;
 
   set.hsl_set.op_en = false;
   set.hsl_set.hsl_lightness = lightness;

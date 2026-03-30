@@ -45,7 +45,7 @@ public:
   // --- Public API for YAML Lambdas ---
 
   void control_light(uint16_t addr, float state, uint32_t &last_send,
-                     uint16_t max_level = 50) {
+                     uint16_t max_level = 50, bool use_ack = false) {
     if (!this->init_done_) {
       ESP_LOGW(TAG, "Mesh not ready, skipping control_light");
       return;
@@ -61,11 +61,11 @@ public:
         level = (uint16_t)(state * max_level);
       }
 
-      ble_mesh_bridge_send_level(addr, level);
+      ble_mesh_bridge_send_level(addr, level, use_ack);
 
       // Send explicit OnOff command only when turning off completely
       if (state == 0) {
-        ble_mesh_bridge_send_onoff(addr, false);
+        ble_mesh_bridge_send_onoff(addr, false, use_ack);
       }
       last_send = now;
     }
@@ -73,7 +73,7 @@ public:
 
   void control_light_hsl(uint16_t addr, float state, float hue,
                          float saturation, uint32_t &last_send,
-                         uint16_t max_level = 50) {
+                         uint16_t max_level = 50, bool use_ack = false) {
     if (!this->init_done_) {
       ESP_LOGW(TAG, "Mesh not ready, skipping control_light_hsl");
       return;
@@ -101,10 +101,10 @@ public:
 
       // Note: Some lamps ignore L in HSL Set and use Level/Lightness Set
       // separately. We'll send HSL Set which includes L.
-      ble_mesh_bridge_send_hsl(addr, l_u16, h_u16, s_u16);
+      ble_mesh_bridge_send_hsl(addr, l_u16, h_u16, s_u16, use_ack);
 
       if (state == 0) {
-        ble_mesh_bridge_send_onoff(addr, false);
+        ble_mesh_bridge_send_onoff(addr, false, use_ack);
       }
       last_send = now;
     }
