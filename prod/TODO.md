@@ -7,16 +7,17 @@
 - [x] Re-provisionner le noeud ESP dans le réseau mesh (0x000C)
 
 ## Étape 1 : Valider ON/OFF
-- [x] Tester ON/OFF Lilou (0x0005) — NO ACK → ✅ fonctionne
-- [ ] Tester ON/OFF Julie (0x0004) — NO ACK ne fonctionne pas, tester avec ACK
-- [ ] Ajouter support ACK/NO ACK configurable par lampe (NO ACK par défaut)
-- [ ] Confirmer que les deux lampes répondent correctement
+- [x] Tester ON/OFF Lilou (0x0005) — NO ACK ✅
+- [x] Tester ON/OFF Julie (0x0004) — ACK ✅ (OnOff ACK fonctionne)
+- [x] Ajouter support ACK/NO ACK configurable par lampe (NO ACK par défaut)
 
 ## Étape 2 : Trouver la plage de luminosité
-- [ ] Tester différentes valeurs de lightness (1-255, 1-10000, 1-65535)
-- [ ] Déterminer la plage réelle de fonctionnement de chaque lampe
-- [ ] Implémenter RANGE_GET pour lire automatiquement min/max
-- [ ] Gérer l'inversion de plage si nécessaire (luminosité ET température)
+- [x] Sweep lightness Lilou NO ACK — range 1-65535 confirmé, changement graduel
+- [x] Sweep lightness Lilou ACK — fonctionne aussi (ACK timeout mais commande reçue)
+- [x] Mettre à jour max_level de 50 à 65535
+- [x] Valider luminosité via entité lumière ESPHome (50% et 100% OK)
+- [ ] Tester luminosité Julie (ACK, range 1-65535 à vérifier)
+- [x] RANGE_GET ne fonctionne pas (timeout sur les deux lampes)
 
 ## Étape 3 : Ajouter CTL (température de couleur)
 - [ ] Ajouter `CONFIG_BLE_MESH_LIGHT_CTL_CLI` au sdkconfig
@@ -26,15 +27,16 @@
 - [ ] Mettre à jour la YAML : passer de `monochromatic` à `color_temperature`
 
 ## Étape 4 : RANGE_GET automatique
-- [ ] Implémenter `ble_mesh_bridge_send_lightness_range_get()`
+- [x] ~~Implémenter send_lightness_range_get~~ — implémenté mais timeout sur les lampes
 - [ ] Implémenter `ble_mesh_bridge_send_ctl_temperature_range_get()`
-- [ ] Parser les réponses RANGE_STATUS dans les callbacks
-- [ ] Stocker les ranges par lampe dans le gateway
-- [ ] Auto-envoyer les RANGE_GET quelques secondes après le boot
+- [ ] Alternative : configurer min/max manuellement si les lampes ne supportent pas RANGE_GET
 
 ## Notes
 - Julie (0x0004) : ACK ONLY — ne fonctionne pas en NO ACK, doit être configurée en ACK
 - Lilou (0x0005) : ACK + NO ACK — fonctionne en NO ACK (défaut)
 - ESP-BLE-MESH node : 0x000C
-- Inversion de plage possible sur luminosité ET température (1→100 => 100→1)
+- Plage lightness : 1-65535 (16 bits complets)
+- Gros changement visible autour de 5000-10000 (courbe non linéaire typique des LEDs)
 - NO ACK par défaut pour toutes les lampes, configurable individuellement en ACK
+- ACK Lightness timeout systématiquement (les lampes ne renvoient pas de réponse Lightness)
+- RANGE_GET timeout sur les deux lampes (non supporté par les lampes LEDVANCE ?)
