@@ -11,3 +11,6 @@ venv/
 # ESPHome
 esphome/.esphome/
 esphome/secrets.yaml
+prod/secrets.yaml
+__pycache__/
+*.pyc
