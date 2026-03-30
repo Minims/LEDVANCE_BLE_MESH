@@ -11,3 +11,4 @@
 - fait des commit bien séparé avec context genre fix(mesh): fix init
 - tu as accès a esphome, analyse les logs, fait les actions via l'api esphome.
 - Tu as des infos sur le reseau mesh dans @prod/nRF Mesh Network.json
+- NO ACK par defaut, configurable en ACK par lampe. Julie nécessite ACK.
