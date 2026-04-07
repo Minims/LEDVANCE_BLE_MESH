@@ -61,11 +61,13 @@ static esp_ble_mesh_client_t onoff_client;
 static esp_ble_mesh_client_t level_client;
 static esp_ble_mesh_client_t light_client;
 static esp_ble_mesh_client_t hsl_client;
+static esp_ble_mesh_client_t ctl_client;
 
 ESP_BLE_MESH_MODEL_PUB_DEFINE(onoff_cli_pub, 2 + 2, ROLE_NODE);
 ESP_BLE_MESH_MODEL_PUB_DEFINE(level_cli_pub, 2 + 2, ROLE_NODE);
 ESP_BLE_MESH_MODEL_PUB_DEFINE(light_cli_pub, 2 + 2, ROLE_NODE);
 ESP_BLE_MESH_MODEL_PUB_DEFINE(hsl_cli_pub, 2 + 2, ROLE_NODE);
+ESP_BLE_MESH_MODEL_PUB_DEFINE(ctl_cli_pub, 2 + 2, ROLE_NODE);
 
 static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_CFG_SRV(&config_server),
@@ -73,6 +75,7 @@ static esp_ble_mesh_model_t root_models[] = {
     ESP_BLE_MESH_MODEL_GEN_LEVEL_CLI(&level_cli_pub, &level_client),
     ESP_BLE_MESH_MODEL_LIGHT_LIGHTNESS_CLI(&light_cli_pub, &light_client),
     ESP_BLE_MESH_MODEL_LIGHT_HSL_CLI(&hsl_cli_pub, &hsl_client),
+    ESP_BLE_MESH_MODEL_LIGHT_CTL_CLI(&ctl_cli_pub, &ctl_client),
 };
 
 static esp_ble_mesh_elem_t elements[] = {
@@ -191,6 +194,11 @@ static void light_client_callback(esp_ble_mesh_light_client_cb_event_t event,
               param->status_cb.hsl_status.hsl_lightness,
               param->status_cb.hsl_status.hsl_hue,
               param->status_cb.hsl_status.hsl_saturation);
+      } else if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_STATUS) {
+        LOG_I(TAG, "CTL ACK from 0x%04X: lightness=%d, temp=%d",
+              addr,
+              param->status_cb.ctl_status.present_ctl_lightness,
+              param->status_cb.ctl_status.present_ctl_temperature);
       }
     } else {
       LOG_E(TAG, "Light client SET failed: addr=0x%04X, opcode=0x%04X, err=%d",
@@ -393,3 +401,34 @@ void ble_mesh_bridge_send_lightness_range_get(uint16_t addr) {
 void ble_mesh_bridge_set_lightness_range_callback(ble_mesh_lightness_range_cb_t cb) {
   s_lightness_range_cb = cb;
 }
+
+void ble_mesh_bridge_send_ctl(uint16_t addr, uint16_t lightness,
+                              uint16_t temperature, int16_t delta_uv,
+                              bool use_ack) {
+  if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+    return;
+
+  esp_ble_mesh_light_client_set_state_t set = {0};
+  esp_ble_mesh_client_common_param_t common = {0};
+
+  common.opcode = use_ack ? ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET
+                          : ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_SET_UNACK;
+  common.model = ctl_client.model;
+  common.ctx.net_idx = s_app_state.net_idx;
+  common.ctx.app_idx = s_app_state.app_idx;
+  common.ctx.addr = addr;
+  common.ctx.send_ttl = 7;
+  common.msg_timeout = use_ack ? 1000 : 0;
+
+  set.ctl_set.op_en = false;
+  set.ctl_set.ctl_lightness = lightness;
+  set.ctl_set.ctl_temperature = temperature;
+  set.ctl_set.ctl_delta_uv = delta_uv;
+  set.ctl_set.tid = s_app_state.tid++;
+
+  LOG_I(TAG, "Send CTL to 0x%04X: L=%d, T=%d, dUV=%d (%s)",
+        addr, lightness, temperature, delta_uv, use_ack ? "ACK" : "UNACK");
+
+  esp_ble_mesh_light_client_set_state(&common, &set);
+}
+
