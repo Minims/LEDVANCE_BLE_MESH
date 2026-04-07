@@ -158,14 +158,36 @@ bluetooth_proxy:
 
 # OUPUT
 output:
-  # Julie: brightness only (monochromatic, ACK)
+  # Julie: brightness via Lightness SET (ACK)
   - platform: template
-    id: mesh_output_0004
+    id: mesh_output_0004_brightness
     type: float
     write_action:
       - lambda: |
-          static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0004, state, last, 65535, true);
+          id(julie_brightness) = state;
+          if (state > 0.001f) {
+            uint16_t lightness = (uint16_t)(state * 65535.0f);
+            float ct = id(julie_color_temp);
+            uint16_t temp_k = 800 + (uint16_t)(ct * 19200.0f);
+            ble_mesh_bridge_send_level(0x0004, lightness, true);
+            ble_mesh_bridge_send_ctl(0x0004, lightness, temp_k, 0, true);
+          } else {
+            ble_mesh_bridge_send_onoff(0x0004, false, true);
+          }
+
+  # Julie: color temperature via CTL SET (ACK)
+  - platform: template
+    id: mesh_output_0004_color_temp
+    type: float
+    write_action:
+      - lambda: |
+          id(julie_color_temp) = state;
+          float bright = id(julie_brightness);
+          if (bright > 0.001f) {
+            uint16_t lightness = (uint16_t)(bright * 65535.0f);
+            uint16_t temp_k = 800 + (uint16_t)(state * 19200.0f);
+            ble_mesh_bridge_send_ctl(0x0004, lightness, temp_k, 0, true);
+          }
 
   # Lilou: brightness via Lightness SET (proven working)
   - platform: template
@@ -200,8 +222,14 @@ output:
             ble_mesh_bridge_send_ctl(0x0005, lightness, temp_k, 0, false);
           }
 
-# Globals for Lilou state tracking
+# Globals for state tracking
 globals:
+  - id: julie_brightness
+    type: float
+    initial_value: '0.0'
+  - id: julie_color_temp
+    type: float
+    initial_value: '0.5'
   - id: lilou_brightness
     type: float
     initial_value: '0.0'
@@ -211,11 +239,14 @@ globals:
 
 # LIGHT
 light:
-  # Julie: brightness only
-  - platform: monochromatic
+  # Julie: brightness + color temperature (ACK)
+  - platform: color_temperature
     name: "Julie"
     id: mesh_light_0004
-    output: mesh_output_0004
+    color_temperature: mesh_output_0004_color_temp
+    brightness: mesh_output_0004_brightness
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2000 K
     gamma_correct: 1.0
     default_transition_length: 0s
 

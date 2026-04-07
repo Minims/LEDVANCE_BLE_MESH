@@ -8,35 +8,45 @@
 
 ## Étape 1 : Valider ON/OFF
 - [x] Tester ON/OFF Lilou (0x0005) — NO ACK ✅
-- [x] Tester ON/OFF Julie (0x0004) — ACK ✅ (OnOff ACK fonctionne)
-- [x] Ajouter support ACK/NO ACK configurable par lampe (NO ACK par défaut)
+- [x] Tester ON/OFF Julie (0x0004) — ACK ✅
+- [x] Ajouter support ACK/NO ACK configurable par lampe
 
-## Étape 2 : Trouver la plage de luminosité
-- [x] Sweep lightness Lilou NO ACK — range 1-65535 confirmé, changement graduel
-- [x] Sweep lightness Lilou ACK — fonctionne aussi (ACK timeout mais commande reçue)
-- [x] Mettre à jour max_level de 50 à 65535
-- [x] Valider luminosité via entité lumière ESPHome (50% et 100% OK)
-- [ ] Tester luminosité Julie (ACK, range 1-65535 à vérifier)
-- [x] RANGE_GET ne fonctionne pas (timeout sur les deux lampes)
+## Étape 2 : Luminosité
+- [x] Sweep lightness Lilou NO ACK — range 1-65535, changement graduel ✅
+- [x] Sweep lightness Lilou ACK — fonctionne (ACK timeout mais commande reçue) ✅
+- [x] Mettre à jour max_level de 50 à 65535 ✅
+- [x] Valider luminosité Lilou via entité lumière ESPHome ✅
+- [ ] Tester luminosité Julie (ACK, range à vérifier)
 
-## Étape 3 : Ajouter CTL (température de couleur)
-- [ ] Ajouter `CONFIG_BLE_MESH_LIGHT_CTL_CLI` au sdkconfig
-- [ ] Ajouter CTL client model au bridge C
-- [ ] Implémenter `ble_mesh_bridge_send_ctl()` (configurable ACK/NO ACK par lampe)
-- [ ] Exposer `control_light_ctl()` dans le gateway C++
-- [ ] Mettre à jour la YAML : passer de `monochromatic` à `color_temperature`
+## Étape 3 : CTL (température de couleur)
+- [x] Ajouter `CONFIG_BLE_MESH_LIGHT_CTL_CLI` au sdkconfig ✅
+- [x] Ajouter CTL client model au bridge C ✅ (auto-bindé AppKey)
+- [x] Implémenter `ble_mesh_bridge_send_ctl()` ✅
+- [x] Sweep CTL Lilou 800-20000K — changement graduel confirmé ✅
+- [x] Migrer Lilou de `monochromatic` à `color_temperature` ✅
+- [x] Luminosité via Lightness SET + CTL pour maintenir la température ✅
+- [x] Température via CTL SET, full range mesh 800-20000 ✅
+- [x] HA affiche 2000K-6500K ✅
+- [ ] Tester CTL Julie (ACK, température à vérifier)
+- [ ] Migrer Julie vers `color_temperature` si CTL fonctionne
 
-## Étape 4 : RANGE_GET automatique
-- [x] ~~Implémenter send_lightness_range_get~~ — implémenté mais timeout sur les lampes
-- [ ] Implémenter `ble_mesh_bridge_send_ctl_temperature_range_get()`
-- [ ] Alternative : configurer min/max manuellement si les lampes ne supportent pas RANGE_GET
+## Étape 4 : RANGE_GET
+- [x] ~~Lightness RANGE_GET~~ — timeout sur les deux lampes (non supporté)
+- [ ] ~~CTL Temperature RANGE_GET~~ — probablement même résultat
+- [x] Alternative : ranges configurés manuellement ✅
+
+## Ce qui reste (Julie)
+- [ ] Vérifier luminosité Julie via `set_mesh_lightness` service (ACK)
+- [ ] Vérifier CTL Julie via `set_mesh_ctl` service (ACK)
+- [ ] Migrer Julie vers `color_temperature` avec ACK
+- [ ] Commit + push
 
 ## Notes
-- Julie (0x0004) : ACK ONLY — ne fonctionne pas en NO ACK, doit être configurée en ACK
-- Lilou (0x0005) : ACK + NO ACK — fonctionne en NO ACK (défaut)
+- Julie (0x0004) : ACK ONLY — doit être configurée en ACK
+- Lilou (0x0005) : NO ACK (défaut), ACK aussi supporté
 - ESP-BLE-MESH node : 0x000C
-- Plage lightness : 1-65535 (16 bits complets)
-- Gros changement visible autour de 5000-10000 (courbe non linéaire typique des LEDs)
-- NO ACK par défaut pour toutes les lampes, configurable individuellement en ACK
-- ACK Lightness timeout systématiquement (les lampes ne renvoient pas de réponse Lightness)
-- RANGE_GET timeout sur les deux lampes (non supporté par les lampes LEDVANCE ?)
+- Plage lightness : 1-65535 (16 bits)
+- Plage CTL mesh : 800-20000 (interne, pas du vrai Kelvin)
+- LEDVANCE CTL : gros changement visible sur tout le range 800-20000
+- Luminosité : gros changement visible autour de 5000-10000
+- ESPHome : 2026.3.3 / ESP-IDF 5.5.3
