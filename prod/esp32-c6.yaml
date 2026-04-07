@@ -24,6 +24,7 @@ esp32:
       CONFIG_BLE_MESH_GENERIC_ONOFF_CLI: "y"
       CONFIG_BLE_MESH_GENERIC_LEVEL_CLI: "y"
       CONFIG_BLE_MESH_LIGHT_LIGHTNESS_CLI: "y"
+      CONFIG_BLE_MESH_LIGHT_CTL_CLI: "y"
       CONFIG_BLE_MESH_NET_BUF_COUNT: "160"
       CONFIG_BLE_MESH_ADV_BUF_COUNT: "160"
       CONFIG_BLE_MESH_RX_SEG_MAX: "20"
@@ -101,6 +102,20 @@ api:
       then:
         - lambda: |-
             ble_mesh_bridge_send_level((uint16_t)address, (uint16_t)level, use_ack != 0);
+
+    # Raw CTL command for color temperature control
+    # address: unicast addr, lightness: 0-65535, temperature: 800-20000 (Kelvin),
+    # delta_uv: typically 0, use_ack: 0=NO ACK, 1=ACK
+    - service: set_mesh_ctl
+      variables:
+        address: int
+        lightness: int
+        temperature: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_ctl((uint16_t)address, (uint16_t)lightness,
+                                    (uint16_t)temperature, 0, use_ack != 0);
 
 # OTA
 ota:
