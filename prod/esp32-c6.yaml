@@ -158,6 +158,7 @@ bluetooth_proxy:
 
 # OUPUT
 output:
+  # Julie: brightness only (monochromatic, ACK)
   - platform: template
     id: mesh_output_0004
     type: float
@@ -166,16 +167,51 @@ output:
           static uint32_t last = 0;
           id(mesh_gateway).control_light(0x0004, state, last, 65535, true);
 
+  # Lilou: brightness via Lightness SET (proven working)
   - platform: template
-    id: mesh_output_0005
+    id: mesh_output_0005_brightness
     type: float
     write_action:
       - lambda: |
-          static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0005, state, last, 65535);
+          id(lilou_brightness) = state;
+          if (state > 0.001f) {
+            uint16_t lightness = (uint16_t)(state * 65535.0f);
+            float ct = id(lilou_color_temp);
+            // Map full slider to mesh CTL range 800-20000
+            uint16_t temp_k = 800 + (uint16_t)(ct * 19200.0f);
+            // Send Lightness SET for brightness + CTL to maintain temperature
+            ble_mesh_bridge_send_level(0x0005, lightness, false);
+            ble_mesh_bridge_send_ctl(0x0005, lightness, temp_k, 0, false);
+          } else {
+            ble_mesh_bridge_send_onoff(0x0005, false, false);
+          }
+
+  # Lilou: color temperature via CTL SET
+  - platform: template
+    id: mesh_output_0005_color_temp
+    type: float
+    write_action:
+      - lambda: |
+          id(lilou_color_temp) = state;
+          float bright = id(lilou_brightness);
+          if (bright > 0.001f) {
+            uint16_t lightness = (uint16_t)(bright * 65535.0f);
+            uint16_t temp_k = 800 + (uint16_t)(state * 19200.0f);
+            ble_mesh_bridge_send_ctl(0x0005, lightness, temp_k, 0, false);
+          }
+
+# Globals for Lilou state tracking
+globals:
+  - id: lilou_brightness
+    type: float
+    initial_value: '0.0'
+  - id: lilou_color_temp
+    type: float
+    initial_value: '0.5'
 
 # LIGHT
 light:
+  # Julie: brightness only
   - platform: monochromatic
     name: "Julie"
     id: mesh_light_0004
@@ -183,9 +219,13 @@ light:
     gamma_correct: 1.0
     default_transition_length: 0s
 
-  - platform: monochromatic
+  # Lilou: brightness + color temperature
+  - platform: color_temperature
     name: "Lilou"
     id: mesh_light_0005
-    output: mesh_output_0005
+    color_temperature: mesh_output_0005_color_temp
+    brightness: mesh_output_0005_brightness
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2000 K
     gamma_correct: 1.0
     default_transition_length: 0s
