@@ -147,6 +147,7 @@ static void config_server_callback(esp_ble_mesh_cfg_server_cb_event_t event,
 }
 
 static ble_mesh_lightness_range_cb_t s_lightness_range_cb = NULL;
+static ble_mesh_ctl_temp_range_cb_t s_ctl_temp_range_cb = NULL;
 
 static void
 generic_client_callback(esp_ble_mesh_generic_client_cb_event_t event,
@@ -215,6 +216,15 @@ static void light_client_callback(esp_ble_mesh_light_client_cb_event_t event,
               addr, status_code, range_min, range_max);
         if (s_lightness_range_cb) {
           s_lightness_range_cb(addr, range_min, range_max);
+        }
+      } else if (param->params->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_STATUS) {
+        uint16_t range_min = param->status_cb.ctl_temperature_range_status.range_min;
+        uint16_t range_max = param->status_cb.ctl_temperature_range_status.range_max;
+        uint8_t status_code = param->status_cb.ctl_temperature_range_status.status_code;
+        LOG_I(TAG, "CTL Temp Range from 0x%04X: status=%d, min=%d, max=%d",
+              addr, status_code, range_min, range_max);
+        if (s_ctl_temp_range_cb) {
+          s_ctl_temp_range_cb(addr, range_min, range_max);
         }
       }
     } else {
@@ -400,6 +410,33 @@ void ble_mesh_bridge_send_lightness_range_get(uint16_t addr) {
 
 void ble_mesh_bridge_set_lightness_range_callback(ble_mesh_lightness_range_cb_t cb) {
   s_lightness_range_cb = cb;
+}
+
+void ble_mesh_bridge_send_ctl_temperature_range_get(uint16_t addr) {
+  if (s_app_state.app_idx == ESP_BLE_MESH_KEY_UNUSED)
+    return;
+
+  esp_ble_mesh_light_client_get_state_t get = {0};
+  esp_ble_mesh_client_common_param_t common = {0};
+
+  common.opcode = ESP_BLE_MESH_MODEL_OP_LIGHT_CTL_TEMPERATURE_RANGE_GET;
+  common.model = ctl_client.model;
+  common.ctx.net_idx = s_app_state.net_idx;
+  common.ctx.app_idx = s_app_state.app_idx;
+  common.ctx.addr = addr;
+  common.ctx.send_ttl = 7;
+  common.msg_timeout = 2000;
+
+  LOG_I(TAG, "Send CTL Temp Range GET to 0x%04X", addr);
+
+  esp_err_t err = esp_ble_mesh_light_client_get_state(&common, &get);
+  if (err) {
+    LOG_E(TAG, "Send CTL Temp Range GET failed: %d", err);
+  }
+}
+
+void ble_mesh_bridge_set_ctl_temp_range_callback(ble_mesh_ctl_temp_range_cb_t cb) {
+  s_ctl_temp_range_cb = cb;
 }
 
 void ble_mesh_bridge_send_ctl(uint16_t addr, uint16_t lightness,

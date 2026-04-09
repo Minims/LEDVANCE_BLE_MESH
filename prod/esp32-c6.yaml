@@ -117,6 +117,14 @@ api:
             ble_mesh_bridge_send_ctl((uint16_t)address, (uint16_t)lightness,
                                     (uint16_t)temperature, 0, use_ack != 0);
 
+    # Query CTL temperature range from a lamp
+    - service: get_ctl_temperature_range
+      variables:
+        address: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_ctl_temperature_range_get((uint16_t)address);
+
 # OTA
 ota:
   - platform: esphome
