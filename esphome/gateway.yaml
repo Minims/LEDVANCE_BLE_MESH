@@ -1,3 +1,8 @@
+# ESPHome BLE Mesh Gateway — ESP32 (standard)
+#
+# Basic example for ESP32 (not C6).
+# Uses local component path for development.
+
 esphome:
   name: ble-mesh-gateway
   friendly_name: BLE Mesh Gateway
@@ -25,6 +30,7 @@ esp32:
       CONFIG_BLE_MESH_GENERIC_ONOFF_CLI: "y"
       CONFIG_BLE_MESH_GENERIC_LEVEL_CLI: "y"
       CONFIG_BLE_MESH_LIGHT_LIGHTNESS_CLI: "y"
+      CONFIG_BLE_MESH_LIGHT_CTL_CLI: "y"
       CONFIG_BLE_MESH_NET_BUF_COUNT: "160"
       CONFIG_BLE_MESH_ADV_BUF_COUNT: "160"
       CONFIG_BLE_MESH_RX_SEG_MAX: "20"
@@ -40,29 +46,24 @@ esp32_ble_tracker:
 bluetooth_proxy:
   active: true
 
-# Enable logging
 logger:
-  level: ERROR
+  level: DEBUG
 
-# Enable Home Assistant API
 api:
   password: ""
 
-# OTA Updates
 ota:
   - platform: esphome
     password: ""
 
-# WiFi Configuration
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-
-  # Fallback AP
   ap:
     ssid: "BLE Mesh Gateway Fallback"
     password: ""
 
+# --- Example lamps (replace addresses) ---
 output:
   - platform: template
     id: mesh_output_0020
@@ -70,14 +71,15 @@ output:
     write_action:
       - lambda: |
           static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0020, state, last, 50);
+          id(mesh_gateway).control_light(0x0020, state, last, 65535);
+
   - platform: template
     id: mesh_output_0015
     type: float
     write_action:
       - lambda: |
           static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0015, state, last, 50);
+          id(mesh_gateway).control_light(0x0015, state, last, 65535);
 
 light:
   - platform: monochromatic
@@ -86,6 +88,7 @@ light:
     output: mesh_output_0020
     gamma_correct: 1.0
     default_transition_length: 0s
+
   - platform: monochromatic
     name: "Flur"
     id: mesh_light_0015

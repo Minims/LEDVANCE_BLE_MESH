@@ -1,6 +1,14 @@
+# ESPHome BLE Mesh Gateway — ESP32-C6 with Home Assistant
+#
+# Full-featured example with:
+#   - Brightness-only lamps (monochromatic)
+#   - Color temperature lamps (CTL)
+#   - Raw services for dynamic control
+#   - Bluetooth Proxy for HA
+
 esphome:
   name: ble-mesh-gateway-c6
-  friendly_name: BLE Mesh Gateway C6 
+  friendly_name: BLE Mesh Gateway C6
 
 external_components:
   - source:
@@ -29,6 +37,7 @@ esp32:
       CONFIG_BLE_MESH_GENERIC_ONOFF_CLI: "y"
       CONFIG_BLE_MESH_GENERIC_LEVEL_CLI: "y"
       CONFIG_BLE_MESH_LIGHT_LIGHTNESS_CLI: "y"
+      CONFIG_BLE_MESH_LIGHT_CTL_CLI: "y"
       CONFIG_BLE_MESH_NET_BUF_COUNT: "160"
       CONFIG_BLE_MESH_ADV_BUF_COUNT: "160"
       CONFIG_BLE_MESH_RX_SEG_MAX: "20"
@@ -44,18 +53,46 @@ esp32_ble_tracker:
 bluetooth_proxy:
   active: true
 
-# Enable logging
 logger:
   level: DEBUG
 
-# Enable Home Assistant API
 api:
   encryption:
     key: !secret api_key
   services:
-    # Control brightness (monochromatic lamp)
-    # address: unicast address (decimal), brightness: 0-100, max_level: e.g. 50
-    # Add use_ack=true as 5th argument for ACK-only lamps
+    # Raw OnOff: state: 0=OFF 1=ON, use_ack: 0=UNACK 1=ACK
+    - service: set_mesh_onoff
+      variables:
+        address: int
+        state: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_onoff((uint16_t)address, state != 0, use_ack != 0);
+
+    # Raw Lightness SET: level: 0-65535
+    - service: set_mesh_lightness
+      variables:
+        address: int
+        level: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_level((uint16_t)address, (uint16_t)level, use_ack != 0);
+
+    # Raw CTL SET: lightness: 0-65535, temperature: 800-20000
+    - service: set_mesh_ctl
+      variables:
+        address: int
+        lightness: int
+        temperature: int
+        use_ack: int
+      then:
+        - lambda: |-
+            ble_mesh_bridge_send_ctl((uint16_t)address, (uint16_t)lightness,
+                                    (uint16_t)temperature, 0, use_ack != 0);
+
+    # Legacy brightness service (0-100 percent)
     - service: set_mesh_light
       variables:
         address: int
@@ -67,8 +104,7 @@ api:
             float bright_f = brightness / 100.0f;
             id(mesh_gateway).control_light(address, bright_f, last_sends[address], max_level);
 
-    # Control HSL color lamp
-    # brightness: 0-100, hue: 0-360, saturation: 0-100
+    # Legacy HSL color service
     - service: set_mesh_light_hsl
       variables:
         address: int
@@ -84,88 +120,88 @@ api:
             float sat_f = saturation / 100.0f;
             id(mesh_gateway).control_light_hsl(address, bright_f, hue_f, sat_f, last_sends[address], max_level);
 
-    # Raw OnOff command (useful for ACK-only lamps)
-    # state: 0=OFF, 1=ON | use_ack: 0=NO ACK (default), 1=ACK
-    - service: set_mesh_onoff
-      variables:
-        address: int
-        state: int
-        use_ack: int
-      then:
-        - lambda: |-
-            ble_mesh_bridge_send_onoff((uint16_t)address, state != 0, use_ack != 0);
-
-# OTA Updates
 ota:
   - platform: esphome
-    password: "22bfa31afb3531fc6e1374f6e5696e91"
+    password: !secret ota_password
 
-# WiFi Configuration
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-
-  # Fallback AP
   ap:
     ssid: "BLE Mesh Gateway C6 Fallback"
     password: ""
 
+# ============================================================
+# EXAMPLE LAMPS — Replace addresses with your lamp's unicast
+# ============================================================
+
+# --- Globals for color temperature lamps ---
+globals:
+  - id: tischlampe_brightness
+    type: float
+    initial_value: '0.0'
+  - id: tischlampe_color_temp
+    type: float
+    initial_value: '0.5'
+
 output:
+  # --- Color Temperature Lamp (brightness + CTL) ---
+  # Replace 0x0020 with your lamp's unicast address
+  # For ACK lamps: change false to true in send_level/send_ctl/send_onoff
   - platform: template
-    id: mesh_output_0020
+    id: mesh_output_0020_brightness
     type: float
     write_action:
       - lambda: |
-          static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0020, state, last, 50);
+          id(tischlampe_brightness) = state;
+          if (state > 0.001f) {
+            uint16_t lightness = (uint16_t)(state * 65535.0f);
+            float ct = id(tischlampe_color_temp);
+            uint16_t temp_k = 800 + (uint16_t)(ct * 19200.0f);
+            ble_mesh_bridge_send_level(0x0020, lightness, false);
+            ble_mesh_bridge_send_ctl(0x0020, lightness, temp_k, 0, false);
+          } else {
+            ble_mesh_bridge_send_onoff(0x0020, false, false);
+          }
 
+  - platform: template
+    id: mesh_output_0020_color_temp
+    type: float
+    write_action:
+      - lambda: |
+          id(tischlampe_color_temp) = state;
+          float bright = id(tischlampe_brightness);
+          if (bright > 0.001f) {
+            uint16_t lightness = (uint16_t)(bright * 65535.0f);
+            uint16_t temp_k = 800 + (uint16_t)(state * 19200.0f);
+            ble_mesh_bridge_send_ctl(0x0020, lightness, temp_k, 0, false);
+          }
+
+  # --- Brightness-only Lamp (monochromatic) ---
   - platform: template
     id: mesh_output_0015
     type: float
     write_action:
       - lambda: |
           static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0015, state, last, 50);
-  - platform: template
-    id: mesh_output_0017
-    type: float
-    write_action:
-      - lambda: |
-          static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0017, state, last, 50);
-  - platform: template
-    id: mesh_output_0018
-    type: float
-    write_action:
-      - lambda: |
-          static uint32_t last = 0;
-          id(mesh_gateway).control_light(0x0018, state, last, 50);
+          id(mesh_gateway).control_light(0x0015, state, last, 65535);
 
 light:
-  - platform: monochromatic
+  # Color temperature lamp
+  - platform: color_temperature
     name: "Tischlampe"
     id: mesh_light_0020
-    output: mesh_output_0020
+    color_temperature: mesh_output_0020_color_temp
+    brightness: mesh_output_0020_brightness
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2000 K
     gamma_correct: 1.0
     default_transition_length: 0s
 
+  # Brightness-only lamp
   - platform: monochromatic
     name: "Flur"
     id: mesh_light_0015
     output: mesh_output_0015
-    gamma_correct: 1.0
-    default_transition_length: 0s
-
-  - platform: monochromatic
-    name: "Wohnzimmer"
-    id: mesh_light_0017
-    output: mesh_output_0017
-    gamma_correct: 1.0
-    default_transition_length: 0s
-
-  - platform: monochromatic
-    name: "Stehlampe"
-    id: mesh_light_0018
-    output: mesh_output_0018
     gamma_correct: 1.0
     default_transition_length: 0s
