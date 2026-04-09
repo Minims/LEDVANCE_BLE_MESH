@@ -16,7 +16,6 @@ bool ble_mesh_bridge_is_ready_to_init(void);
 // Send commands (use_ack: true = SET with response, false = SET_UNACK)
 void ble_mesh_bridge_send_onoff(uint16_t addr, bool state, bool use_ack);
 void ble_mesh_bridge_send_level(uint16_t addr, uint16_t level, bool use_ack);
-void ble_mesh_bridge_send_generic_level(uint16_t addr, int16_t level);
 void ble_mesh_bridge_send_hsl(uint16_t addr, uint16_t lightness, uint16_t hue,
                               uint16_t saturation, bool use_ack);
 void ble_mesh_bridge_send_ctl(uint16_t addr, uint16_t lightness,

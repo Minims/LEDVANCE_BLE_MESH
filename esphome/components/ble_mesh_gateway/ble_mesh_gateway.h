@@ -45,7 +45,7 @@ public:
   // --- Public API for YAML Lambdas ---
 
   void control_light(uint16_t addr, float state, uint32_t &last_send,
-                     uint16_t max_level = 50, bool use_ack = false) {
+                     uint16_t max_level = 65535, bool use_ack = false) {
     if (!this->init_done_) {
       ESP_LOGW(TAG, "Mesh not ready, skipping control_light");
       return;
@@ -73,7 +73,7 @@ public:
 
   void control_light_hsl(uint16_t addr, float state, float hue,
                          float saturation, uint32_t &last_send,
-                         uint16_t max_level = 50, bool use_ack = false) {
+                         uint16_t max_level = 65535, bool use_ack = false) {
     if (!this->init_done_) {
       ESP_LOGW(TAG, "Mesh not ready, skipping control_light_hsl");
       return;
