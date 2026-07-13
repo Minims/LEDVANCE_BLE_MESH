@@ -1,0 +1,12 @@
+{
+  "name": "LEDVANCE BLE Mesh (ESP32-S3)",
+  "version": "main",
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "firmware.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

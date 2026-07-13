@@ -1,0 +1,12 @@
+{
+  "name": "LEDVANCE BLE Mesh (ESP32-C6)",
+  "version": "main",
+  "builds": [
+    {
+      "chipFamily": "ESP32-C6",
+      "parts": [
+        { "path": "firmware.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
